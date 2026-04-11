@@ -55,25 +55,25 @@ async def _proxy_request(
     async with httpx.AsyncClient(timeout=120.0) as client:
         if is_stream:
             async def generate():
-                print("🔥 [STREAM] start")
+                #print("🔥 [STREAM] start")
 
                 async with httpx.AsyncClient(timeout=120.0) as client:
                     try:
                         async with client.stream(
                                 "POST", upstream_url, json=body, headers=headers
                         ) as resp:
-                            print(f"🔥 [UPSTREAM STATUS] {resp.status_code}")
+                            #print(f"🔥 [UPSTREAM STATUS] {resp.status_code}")
                             print(f"🔥 [UPSTREAM HEADERS] {resp.headers}")
 
                             async for line in resp.aiter_lines():
-                                print(f"🔥 [RAW LINE] {repr(line)}")  # 👈 核心
+                                #print(f"🔥 [RAW LINE] {repr(line)}")  # 👈 核心
 
                                 if not line:
                                     continue
 
                                 data = line.strip()
 
-                                print(f"🔥 [YIELD] {data}")  # 👈 看你到底有没有发出去
+                                #print(f"🔥 [YIELD] {data}")  # 👈 看你到底有没有发出去
 
                                 yield f"{data}\n\n"
 
