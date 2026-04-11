@@ -17,7 +17,7 @@ pip install -r requirements.txt
 python create_admin.py --username admin --password yourpassword
 
 # 3. 启动后端
-uvicorn main:app --reload --port 8080
+python -m uvicorn main:app --host 0.0.0.0 --port 8080
 
 # 4. 前端
 # 直接用浏览器打开 localhost:8080
