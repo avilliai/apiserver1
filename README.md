@@ -1,6 +1,7 @@
 # API Gateway
 
-邀请码制 API 网关，支持插件化接口、配额管理、管理员控制台。高拓展性。
+API 网关，支持插件化接口、配额管理、管理员控制台。高拓展性。    
+项目自带openai router，可转发openai格式请求到多个不同的上游服务。
 
 <img width="2546" height="1394" alt="image" src="https://github.com/user-attachments/assets/88238b42-7d36-417c-85bc-005e8af99499" />
 
@@ -10,7 +11,6 @@
 
 ```bash
 # 1. 安装依赖
-cd backend
 pip install -r requirements.txt
 
 # 2. 创建首个管理员（一次性）
@@ -29,7 +29,6 @@ uvicorn main:app --reload --port 8080
 
 ```
 api-gateway/
-├── backend/
 ├── main.py                 # 入口，自动发现插件
 ├── core/
 │   ├── database.py         # 数据模型 (User, InviteCode, RequestLog)
@@ -39,7 +38,7 @@ api-gateway/
 │   ├── admin.py            # 管理员接口
 │   └── user.py             # 用户自助接口
 └── plugins/
-   └── openai_proxy/       # 第一个插件
+│   └── openai_proxy/       # 第一个插件
 │       ├── __init__.py
 │       ├── config.py       # 插件配置（唯一需要改的文件）
 │       └── router.py       # FastAPI 路由
@@ -52,7 +51,7 @@ api-gateway/
 
 ## 如何添加新插件
 
-**只需在 `backend/plugins/` 下新建文件夹，包含三个文件：**
+**只需在 `plugins/` 下新建文件夹，包含三个文件：**
 
 ### 1. `__init__.py`（空文件）
 
