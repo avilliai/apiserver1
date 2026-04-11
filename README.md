@@ -1,6 +1,8 @@
 # API Gateway
 
-邀请码制 API 网关，支持插件化接口、配额管理、管理员控制台。
+邀请码制 API 网关，支持插件化接口、配额管理、管理员控制台。高拓展性。
+
+<img width="2546" height="1394" alt="image" src="https://github.com/user-attachments/assets/88238b42-7d36-417c-85bc-005e8af99499" />
 
 ---
 
@@ -18,8 +20,7 @@ python create_admin.py --username admin --password yourpassword
 uvicorn main:app --reload --port 8080
 
 # 4. 前端
-# 直接用浏览器打开 frontend/index.html，或用 nginx/caddy 托管
-# 开发时设置 index.html 顶部 const API = 'http://localhost:8080'
+# 直接用浏览器打开 localhost:8080
 ```
 
 ---
@@ -29,23 +30,22 @@ uvicorn main:app --reload --port 8080
 ```
 api-gateway/
 ├── backend/
-│   ├── main.py                 # 入口，自动发现插件
-│   ├── core/
-│   │   ├── database.py         # 数据模型 (User, InviteCode, RequestLog)
-│   │   ├── auth.py             # 注册/登录
-│   │   ├── auth_utils.py       # JWT / 密码工具
-│   │   ├── quota.py            # 配额检查依赖 (require_quota)
-│   │   ├── admin.py            # 管理员接口
-│   │   └── user.py             # 用户自助接口
-│   └── plugins/
-│       └── openai_proxy/       # 第一个插件
-│           ├── __init__.py
-│           ├── config.py       # 插件配置（唯一需要改的文件）
-│           └── router.py       # FastAPI 路由
+├── main.py                 # 入口，自动发现插件
+├── core/
+│   ├── database.py         # 数据模型 (User, InviteCode, RequestLog)
+│   ├── auth.py             # 注册/登录
+│   ├── auth_utils.py       # JWT / 密码工具
+│   ├── quota.py            # 配额检查依赖 (require_quota)
+│   ├── admin.py            # 管理员接口
+│   └── user.py             # 用户自助接口
+└── plugins/
+   └── openai_proxy/       # 第一个插件
+│       ├── __init__.py
+│       ├── config.py       # 插件配置（唯一需要改的文件）
+│       └── router.py       # FastAPI 路由
 ├── frontend/
 │   └── index.html              # 单文件前端
-└── scripts/
-    └── create_admin.py         # 初始管理员创建脚本
+└── create_admin.py         # 初始管理员创建脚本
 ```
 
 ---
@@ -69,7 +69,7 @@ DESCRIPTION = "Does something cool" # 描述
 # None = 不限制；整数 = 每用户调用上限
 QUOTA_DEFAULT = 100
 
-# 可选：供路由内引用的其他配置
+# 可选：供router内引用的其他配置
 MY_SETTING = "value"
 ```
 
@@ -82,7 +82,7 @@ from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.my_plugin import config
 
-PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径
+PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径。此时需要请求http://localhost:8080/api/v1/my_plugin/action，可设置为""，这样就是http://localhost:8080/action
 PLUGIN_NAME = "my_plugin"
 router = APIRouter()
 
@@ -120,13 +120,66 @@ async def my_action(
 
 1. 管理员登录后台 → Invite Codes → 生成
 2. 将 code 发给用户
-3. 用户注册时填写，注册成功后 code 立即销毁（不可复用）
+3. 用户注册时填写，注册成功后 code 立即销毁（不可复用）   
+
+也可使用管理员账户密码，将邀请码生成封装为函数。
+```python
+import httpx
+
+
+def generate_invites(base_url, username, password, count=1):
+    """
+    自动登录 + 生成邀请码
+
+    :param base_url: 例如 http://localhost:8080
+    :param username: 管理员用户名
+    :param password: 管理员密码
+    :param count: 生成数量
+    :return: 邀请码列表
+    """
+
+    base_url = base_url.rstrip("/")
+    with httpx.Client(timeout=10) as client:
+        login_resp = client.post(
+            f"{base_url}/api/auth/login",
+            json={
+                "username": username,
+                "password": password
+            }
+        )
+        if login_resp.status_code != 200:
+            raise Exception(f"登录失败: {login_resp.text}")
+        token = login_resp.json().get("access_token")
+        if not token:
+            raise Exception("没有拿到 token")
+        # 2️⃣ 生成邀请码
+        gen_resp = client.post(
+            f"{base_url}/api/admin/invite/generate",
+            params={"count": count},
+            headers={
+                "Authorization": f"Bearer {token}"
+            }
+        )
+        if gen_resp.status_code != 200:
+            raise Exception(f"生成失败: {gen_resp.text}")
+
+        data = gen_resp.json()
+        return data.get("codes", [])
+codes = generate_invites(
+    base_url="http://localhost:8080",  #真到生产环境了记得自己改
+    username="admin_name",  #你自己的管理员账户和密码
+    password="pwd",
+    count=1  #生成数量
+)
+
+print(codes)
+```
 
 ---
 
 ## OpenAI 代理插件配置
 
-编辑 `backend/plugins/openai_proxy/config.py`：
+编辑 `plugins/openai_proxy/config.py`：
 
 ```python
 UPSTREAM_API_KEY = "sk-your-real-key"  # 你的主 API Key
@@ -147,7 +200,7 @@ QUOTA_DEFAULT = 500  # 每用户默认 500 次
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://your-gateway/api/v1/openai",
+    base_url="http://your-gateway/v1",
     api_key="your-gateway-user-token",  # 用登录返回的 JWT
 )
 
