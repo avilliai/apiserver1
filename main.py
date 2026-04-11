@@ -13,7 +13,9 @@ from core.database import engine, Base
 from core.auth import router as auth_router
 from core.admin import router as admin_router
 from core.user import router as user_router
+import logging
 
+logging.getLogger().setLevel(logging.INFO)
 app = FastAPI(title="API Gateway", version="1.0.0")
 
 app.add_middleware(
