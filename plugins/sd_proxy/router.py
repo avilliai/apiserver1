@@ -60,7 +60,7 @@ async def _forward_request(
                 body[key] = value
             if key == "prompt":
                 body["prompt"] = body['prompt'] + value
-    body=fix_paramters(body)
+    fix_paramters(body)
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(url, json=body, headers=headers)
 
