@@ -20,7 +20,7 @@ from core.quota import get_current_user, require_quota, log_request
 from plugins.sd_proxy import config
 
 PLUGIN_NAME = "sd_proxy"
-
+PLUGIN_PREFIX = ""
 router = APIRouter()
 
 
