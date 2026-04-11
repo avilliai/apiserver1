@@ -12,7 +12,7 @@ cd backend
 pip install -r requirements.txt
 
 # 2. 创建首个管理员（一次性）
-python ../scripts/create_admin.py --username admin --password yourpassword
+python create_admin.py --username admin --password yourpassword
 
 # 3. 启动后端
 uvicorn main:app --reload --port 8080
