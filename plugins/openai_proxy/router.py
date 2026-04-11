@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.openai_proxy import config
+import logging
 
+logger = logging.getLogger("ai_proxy")
 # Prefix this plugins mounts at
 PLUGIN_PREFIX = ""
 
@@ -51,7 +53,7 @@ async def _proxy_request(
         "Authorization": f"Bearer {config.UPSTREAM_API_KEY}",
         "Content-Type": "application/json",
     }
-
+    logger.info(f"Proxying request for model '{model}' to {upstream_url} (stream={is_stream})")
     async with httpx.AsyncClient(timeout=120.0) as client:
         if is_stream:
             async def generate():
@@ -63,7 +65,7 @@ async def _proxy_request(
                                 "POST", upstream_url, json=body, headers=headers
                         ) as resp:
                             #print(f"🔥 [UPSTREAM STATUS] {resp.status_code}")
-                            print(f"🔥 [UPSTREAM HEADERS] {resp.headers}")
+                            logger.info(f"🔥 [UPSTREAM HEADERS] {resp.headers}")
 
                             async for line in resp.aiter_lines():
                                 #print(f"🔥 [RAW LINE] {repr(line)}")  # 👈 核心
@@ -78,7 +80,7 @@ async def _proxy_request(
                                 yield f"{data}\n\n"
 
                     except Exception as e:
-                        print("❌ [STREAM ERROR]", e)
+                        logger.error("❌ [STREAM ERROR]", e)
                         raise
 
             return StreamingResponse(generate(), media_type="text/event-stream")

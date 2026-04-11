@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.sd_proxy import config
+import logging
+
+logger = logging.getLogger("sd_proxy")
 
 PLUGIN_NAME = "sd_proxy"
 PLUGIN_PREFIX = ""
@@ -43,6 +46,9 @@ async def _forward_request(
         body = await request.json()
     except Exception:
         body = None
+    logger.info(f"📥 收到请求: {request.method} {request.url}")
+    logger.info(f"👤 用户: {getattr(user, 'id', None)}")
+    logger.info(f"➡️ 转发到: {url}")
 
     def fix_paramters(body: dict):
         ideal_structure = {'denoising_strength': 0.7, 'enable_hr': 'false', 'hr_scale': 1.5, 'hr_second_pass_steps': 15,
