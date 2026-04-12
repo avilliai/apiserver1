@@ -1,7 +1,8 @@
 # API Gateway
 
 API 网关，支持插件化接口、配额管理、管理员控制台。高拓展性。    
-项目自带openai router，可转发openai格式请求到多个不同的上游服务。
+项目自带openai router，可转发openai格式请求到多个不同的上游服务。     
+**由于本人是前端苦手，为尽量避免前端工作而制作了此项目。在增加新功能后，仅需在后端插件的config.py中稍作配置，前端即可自动更新**。
 
 <img width="2546" height="1394" alt="image" src="https://github.com/user-attachments/assets/88238b42-7d36-417c-85bc-005e8af99499" />
 
