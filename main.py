@@ -25,11 +25,10 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    start_scheduler()   # ← 应用启动时启动调度器
+    start_scheduler()
     yield
-    # 如果需要优雅关闭：
-    # from core.scheduler import scheduler
-    # scheduler.shutdown()
+
+
 app = FastAPI(title="API Gateway", version="1.0.0",lifespan=lifespan)
 
 app.add_middleware(
@@ -64,11 +63,6 @@ def load_plugins():
 
 load_plugins()
 
-@app.on_event("startup")
-async def startup():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("[DB] Tables created/verified.")
 
 @app.get("/api/health")
 async def health():

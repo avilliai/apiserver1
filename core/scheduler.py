@@ -39,5 +39,5 @@ def start_scheduler():
         minute=0,
         timezone="Asia/Tokyo",
     )
-    scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=0, timezone="Asia/Tokyo")
+    scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=29, timezone="Asia/Tokyo")
     scheduler.start()
