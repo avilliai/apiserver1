@@ -45,8 +45,8 @@ async def _forward_request(
         body = await request.json()
     except Exception:
         body = None
-    logger.info(f"📥 收到请求: {request.method} {request.url}")
-    logger.info(f"👤 用户: {getattr(user, 'id', None)}")
+    logger.info(f"📥 收到请求: {request.method} {request.url} | {body}")
+    logger.info(f"👤 用户: {getattr(user, 'username', None)}")
     logger.info(f"➡️ 转发到: {url}")
 
     def fix_paramters(body: dict):

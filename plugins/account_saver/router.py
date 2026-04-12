@@ -40,7 +40,7 @@ async def save_batch_to_files(accounts):
             for acc in accounts:
                 f.write(f"{acc['token']}\n")
 
-    logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 💾 保存 {len(accounts)} 个账号")
+    logger.info(f" 💾 保存 {len(accounts)} 个账号")
 
 
 # ==================== API ====================
