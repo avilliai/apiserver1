@@ -16,8 +16,21 @@ from core.auth import router as auth_router
 from core.admin import router as admin_router
 from core.user import router as user_router
 import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
-logging.getLogger().setLevel(logging.INFO)
+uvicorn_access = logging.getLogger("uvicorn.access")
+uvicorn_access.handlers.clear()
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter(
+    fmt="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+))
+uvicorn_access.addHandler(handler)
+uvicorn_access.propagate = False  # 不往上冒泡，避免重复打印
 
 from contextlib import asynccontextmanager
 from core.scheduler import start_scheduler
