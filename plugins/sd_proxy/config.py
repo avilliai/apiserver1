@@ -8,7 +8,7 @@ DISPLAY_NAME = "Stable Diffusion Proxy"
 DESCRIPTION = "Proxy for SD WebUI APIs (txt2img, img2img, loras, models, png-info)"
 
 # 每个 API Key 每天 50 次
-QUOTA_DEFAULT = 50
+QUOTA_DEFAULT = 20
 
 # 统一转发到你的 SD 服务
 UPSTREAM_BASE_URL = "http://localhost:3529"
