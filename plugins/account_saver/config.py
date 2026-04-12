@@ -13,3 +13,6 @@ DESCRIPTION = "Unified OpenAI-compatible proxy. Routes Grok → :8000, GPT/Gemin
 # Set to None for unlimited, or an integer to cap per-user calls
 QUOTA_DEFAULT = None
 
+EXAMPLE = """
+不向外开放
+"""
