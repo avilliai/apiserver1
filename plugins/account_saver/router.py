@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
+import logging
+logger = logging.getLogger(__name__)
+
 PLUGIN_PREFIX = ""
 PLUGIN_NAME = "account_saver"
 router = APIRouter()
@@ -37,7 +40,7 @@ async def save_batch_to_files(accounts):
             for acc in accounts:
                 f.write(f"{acc['token']}\n")
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 💾 保存 {len(accounts)} 个账号")
+    logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 💾 保存 {len(accounts)} 个账号")
 
 
 # ==================== API ====================
@@ -86,7 +89,7 @@ async def save_accounts(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"[ERROR] {e}")
+        logger.error(f"[ERROR] {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

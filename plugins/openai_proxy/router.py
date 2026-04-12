@@ -15,8 +15,7 @@ from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.openai_proxy import config
 import logging
-
-logger = logging.getLogger("ai_proxy")
+logger = logging.getLogger(__name__)
 # Prefix this plugins mounts at
 PLUGIN_PREFIX = ""
 

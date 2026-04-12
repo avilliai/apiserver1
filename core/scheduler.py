@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified  # ← 新增
 
+from core.ban import cleanup_request_log
 from core.database import AsyncSessionLocal, User
 
 scheduler = AsyncIOScheduler()
@@ -38,4 +39,5 @@ def start_scheduler():
         minute=0,
         timezone="Asia/Tokyo",
     )
+    scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=0, timezone="Asia/Tokyo")
     scheduler.start()

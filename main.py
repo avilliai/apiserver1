@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import importlib, pkgutil, os, sys
 
+from core.ban import AutoBanMiddleware
+
 sys.path.insert(0, os.path.dirname(__file__))
 
 from core.database import engine, Base
@@ -36,6 +38,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AutoBanMiddleware)
 
 # Core routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
