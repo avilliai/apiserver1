@@ -18,3 +18,20 @@ UPSTREAM_API_KEY = ""
 
 # 记录字段
 DB_EXTRA_FIELDS = ["endpoint"]
+
+EXAMPLE = """
+import base64
+import requests
+BASE = "http://apollodorus.xyz:8080"
+apikey='sk-xxxx'
+r= requests.post(
+    BASE + "/sdapi/v1/txt2img",
+    json = {"prompt": "1girl"},
+    headers={"Authorization":f"Bearer {apikey}"},
+    timeout=1000)
+img_b64=r.json()['images'][0]
+image_data = base64.b64decode(img_b64)
+with open("test.jpg", "wb") as f:
+    f.write(image_data)
+"""
+

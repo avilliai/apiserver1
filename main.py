@@ -16,7 +16,18 @@ from core.user import router as user_router
 import logging
 
 logging.getLogger().setLevel(logging.INFO)
-app = FastAPI(title="API Gateway", version="1.0.0")
+
+from contextlib import asynccontextmanager
+from core.scheduler import start_scheduler
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()   # ← 应用启动时启动调度器
+    yield
+    # 如果需要优雅关闭：
+    # from core.scheduler import scheduler
+    # scheduler.shutdown()
+app = FastAPI(title="API Gateway", version="1.0.0",lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -73,15 +84,12 @@ async def list_plugins():
                 "display_name": getattr(cfg, "DISPLAY_NAME", name),
                 "description": getattr(cfg, "DESCRIPTION", ""),
                 "quota_default": getattr(cfg, "QUOTA_DEFAULT", None),
+                "example": getattr(cfg, "EXAMPLE", ""),
             })
         except Exception:
             pass
     return plugins
-from core.scheduler import start_scheduler
 
-@app.on_event("startup")
-async def startup_event():
-    start_scheduler()
 # ---- 托管前端静态文件 ----
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse

@@ -18,6 +18,8 @@ python create_admin.py --username admin --password yourpassword
 
 # 3. 启动后端
 python -m uvicorn main:app --host 0.0.0.0 --port 8080
+或  
+python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload # 开发环境，代码修改自动热重载
 
 # 4. 前端
 # 直接用浏览器打开 localhost:8080
@@ -63,13 +65,28 @@ api-gateway/
 
 ```python
 DISPLAY_NAME = "My Plugin"          # 前端显示名称
-DESCRIPTION = "Does something cool" # 描述
+DESCRIPTION = "Do something cool" # 描述
 
 # None = 不限制；整数 = 每用户调用上限
 QUOTA_DEFAULT = 100
 
 # 可选：供router内引用的其他配置
-MY_SETTING = "value"
+MY_SETTING1 = "value"
+MY_SETTING2 = [1, 2, 3]
+
+#EXAMPLE是可选的，自动在前端显示调用示例
+EXAMPLE = """
+import base64
+import requests
+BASE = "http://apollodorus.xyz:8080"
+apikey='sk-xxxx'
+r= requests.post(
+    BASE + "/action",  # 注意这里的路径
+    headers={"Authorization":f"Bearer {apikey}"},
+    timeout=1000)
+print(r.json())
+"""
+
 ```
 
 ### 3. `router.py`
@@ -81,8 +98,9 @@ from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.my_plugin import config
 
-PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径。此时需要请求http://localhost:8080/api/v1/my_plugin/action，可设置为""，这样就是http://localhost:8080/action
-PLUGIN_NAME = "my_plugin"
+#PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径。此时需要请求http://localhost:8080/api/v1/my_plugin/action，可设置为""，这样就是http://localhost:8080/action
+PLUGIN_PREFIX = ""
+PLUGIN_NAME = "my_plugin"  # 插件文件夹名，必须一致。
 router = APIRouter()
 
 @router.post("/action")

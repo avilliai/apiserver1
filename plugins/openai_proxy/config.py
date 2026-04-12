@@ -29,3 +29,19 @@ UPSTREAM_API_KEY = "endlesswork"
 
 # DB_EXTRA_FIELDS: informational, tracked in RequestLog.extra_json
 DB_EXTRA_FIELDS = ["model", "prompt_tokens", "completion_tokens"]
+
+EXAMPLE = """
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://apollodorus.xyz:8080/v1",
+    api_key="sk-xxxx"
+)
+
+# Chat completion
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.choices[0].message.content)
+"""

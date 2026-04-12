@@ -259,6 +259,60 @@
     .badge-user  { background: rgba(61,107,98,0.20); color: var(--text3); }
     code { color: var(--accent2); background: rgba(77,184,160,0.08); padding: 2px 6px; border-radius:4px; font-family: var(--mono); font-size:0.9em; }
 
+    /* PLUGIN PAGE */
+    .plugin-tabs { display:flex; gap:0; margin-bottom:24px; border-bottom:1px solid var(--border2); }
+    .plugin-tab {
+      padding: 9px 22px; font-family: var(--mono); font-size:11px; letter-spacing:2px;
+      text-transform:uppercase; cursor:pointer; color:var(--text3);
+      border-bottom:2px solid transparent; margin-bottom:-1px;
+      transition: color 0.14s, border-color 0.14s;
+    }
+    .plugin-tab:hover { color:var(--text2); }
+    .plugin-tab.active { color:var(--accent2); border-bottom-color:var(--accent); }
+    .plugin-panel { display:none; }
+    .plugin-panel.active { display:block; animation: fadeUp 0.18s ease; }
+
+    /* CODE BLOCK */
+    .code-block-wrap { position:relative; }
+    .code-block {
+      background: rgba(0,0,0,0.45); border:1px solid var(--border2);
+      border-radius:var(--r); padding:18px 20px;
+      font-family:var(--mono); font-size:12.5px; color:var(--text2);
+      line-height:1.85; overflow-x:auto; white-space:pre;
+      tab-size:4;
+    }
+    .code-copy-btn {
+      position:absolute; top:10px; right:10px;
+      background:rgba(62,166,255,0.10); border:1px solid var(--border2);
+      color:var(--text3); font-family:var(--mono); font-size:10px;
+      letter-spacing:1.5px; padding:4px 12px; border-radius:4px;
+      cursor:pointer; transition:all 0.13s;
+    }
+    .code-copy-btn:hover { color:var(--accent2); border-color:var(--border3); background:rgba(62,166,255,0.16); }
+
+    /* TEST PANEL */
+    .test-panel { display:flex; flex-direction:column; gap:16px; }
+    .test-apikey-row { display:flex; gap:10px; align-items:center; }
+    .test-apikey-row .form-input { font-family:var(--mono); font-size:12px; }
+    .test-run-btn { flex-shrink:0; }
+    .test-extra-fields { display:flex; flex-direction:column; gap:10px; }
+    .test-result-wrap { margin-top:4px; }
+    .test-result-label { font-family:var(--mono); font-size:10px; letter-spacing:3px; text-transform:uppercase; color:var(--text3); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+    .test-result-status { }
+    .test-result-body {
+      background:rgba(0,0,0,0.45); border:1px solid var(--border2); border-radius:var(--r);
+      padding:14px 16px; font-family:var(--mono); font-size:12px; color:var(--text2);
+      line-height:1.7; max-height:340px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;
+    }
+    .test-result-body::-webkit-scrollbar { width:3px; }
+    .test-result-body::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+    .test-spinner { display:inline-block; width:13px; height:13px; border:2px solid var(--border2); border-top-color:var(--accent); border-radius:50%; animation:spin 0.7s linear infinite; margin-right:6px; vertical-align:middle; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    /* Image preview in test results */
+    .test-img-grid { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    .test-img-grid img { max-width:240px; max-height:240px; border-radius:var(--r); border:1px solid var(--border2); object-fit:contain; background:#000; }
+
     @media (max-width: 900px) {
       #sidebar { display:none; }
       #main { padding:20px; }
@@ -501,17 +555,203 @@ async function initApp() {
   if (S.user.is_admin) document.getElementById('admin-nav-group').style.display = '';
   try {
     S.plugins = await apiFetch('/api/plugins');
-    const nav = document.getElementById('plugin-nav');
+    const nav  = document.getElementById('plugin-nav');
+    const main = document.getElementById('main');
     nav.innerHTML = '';
     S.plugins.forEach(p => {
+      // Sidebar nav item
       const el = document.createElement('div');
       el.className = 'nav-item'; el.dataset.page = `plugin-${p.name}`;
       el.innerHTML = `<span class="nav-icon">⬡</span> ${p.display_name}`;
       el.onclick = () => goPage(`plugin-${p.name}`);
       nav.appendChild(el);
+
+      // Dynamic plugin page
+      if (document.getElementById(`page-plugin-${p.name}`)) return;
+      const pg = document.createElement('div');
+      pg.className = 'page'; pg.id = `page-plugin-${p.name}`;
+      pg.innerHTML = buildPluginPage(p);
+      main.appendChild(pg);
     });
   } catch(_) {}
   goPage('dashboard');
+}
+
+function buildPluginPage(p) {
+  const exampleCode = (p.example || '').trim();
+  // Replace sk-xxxx placeholder with a live input variable reference for the test panel
+  const hasExample = exampleCode.length > 0;
+
+  // Determine if example uses requests (Python) or another lang
+  const isRequests = exampleCode.includes('requests.');
+  const exampleHtml = hasExample
+    ? `<div class="code-block-wrap">
+         <pre class="code-block" id="ex-code-${p.name}">${escHtml(exampleCode)}</pre>
+         <button class="code-copy-btn" onclick="copyCode('ex-code-${p.name}')">COPY</button>
+       </div>`
+    : `<div class="text-muted">No example available for this plugin.</div>`;
+
+  // Build test fields — parse method/url/body from the example if possible
+  const parsed   = parseExample(exampleCode);
+  const testBody = parsed.body ? escHtml(JSON.stringify(parsed.body, null, 2)) : '{}';
+  const testUrl  = parsed.url  ? escHtml(parsed.url) : '';
+
+  return `
+    <div class="page-header">
+      <h1>${escHtml(p.display_name)}</h1>
+      <p>${escHtml(p.description || '')}</p>
+    </div>
+
+    <div class="plugin-tabs">
+      <div class="plugin-tab active" onclick="switchPluginTab('${p.name}','example',this)">Example Code</div>
+      <div class="plugin-tab"       onclick="switchPluginTab('${p.name}','test',this)">Live Test</div>
+    </div>
+
+    <!-- Example panel -->
+    <div class="plugin-panel active" id="ptab-${p.name}-example">
+      <div class="card">
+        <div class="card-title">Sample Call</div>
+        ${exampleHtml}
+      </div>
+    </div>
+
+    <!-- Test panel -->
+    <div class="plugin-panel" id="ptab-${p.name}-test">
+      <div class="card">
+        <div class="card-title">Live Test</div>
+        <div class="test-panel">
+          <div>
+            <label class="form-label">API Key</label>
+            <div class="test-apikey-row">
+              <input class="form-input" id="tkey-${p.name}" placeholder="sk-…  (your API key)" style="flex:1;font-family:var(--mono);font-size:12px" />
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Endpoint Path</label>
+            <input class="form-input" id="turl-${p.name}" placeholder="/plugin-path/endpoint" value="${testUrl}" style="font-family:var(--mono);font-size:12px" />
+          </div>
+          <div>
+            <label class="form-label">Method</label>
+            <select class="form-input" id="tmethod-${p.name}" style="cursor:pointer">
+              <option value="POST" ${parsed.method==='POST'?'selected':''}>POST</option>
+              <option value="GET"  ${parsed.method==='GET' ?'selected':''}>GET</option>
+              <option value="PUT"  ${parsed.method==='PUT' ?'selected':''}>PUT</option>
+            </select>
+          </div>
+          <div id="tbody-wrap-${p.name}">
+            <label class="form-label">Request Body (JSON)</label>
+            <textarea class="form-input" id="tbody-${p.name}" rows="5" style="font-family:var(--mono);font-size:12px;resize:vertical">${testBody}</textarea>
+          </div>
+          <div>
+            <button class="btn btn-primary test-run-btn" onclick="runTest('${p.name}')">▶ Send Request</button>
+          </div>
+          <div class="test-result-wrap" id="tresult-${p.name}" style="display:none">
+            <div class="test-result-label">
+              <span>Response</span>
+              <span class="test-result-status" id="tstatus-${p.name}"></span>
+            </div>
+            <div class="test-result-body" id="tbody-out-${p.name}"></div>
+            <div class="test-img-grid" id="timg-${p.name}"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function switchPluginTab(pluginName, tab, el) {
+  const panels = ['example','test'];
+  panels.forEach(t => {
+    document.getElementById(`ptab-${pluginName}-${t}`).classList.toggle('active', t===tab);
+  });
+  el.closest('.plugin-tabs').querySelectorAll('.plugin-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function copyCode(id) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => toast('Copied!'));
+}
+
+// Best-effort: parse method, URL path, and body from a Python requests example
+function parseExample(code) {
+  const result = { method: 'POST', url: '', body: null };
+  // method
+  const mMatch = code.match(/requests\.(post|get|put|delete|patch)\s*\(/i);
+  if (mMatch) result.method = mMatch[1].toUpperCase();
+  // url path — extract the path portion after BASE
+  const urlMatch = code.match(/BASE\s*\+\s*["']([^"']+)["']/);
+  if (urlMatch) result.url = urlMatch[1];
+  // json body
+  const jsonMatch = code.match(/json\s*=\s*(\{[^}]+\})/s);
+  if (jsonMatch) {
+    try {
+      // convert Python dict literals to JSON-ish
+      const jsonStr = jsonMatch[1]
+        .replace(/'/g, '"')
+        .replace(/True/g,'true').replace(/False/g,'false').replace(/None/g,'null');
+      result.body = JSON.parse(jsonStr);
+    } catch(_) { result.body = {}; }
+  }
+  return result;
+}
+
+async function runTest(pluginName) {
+  const apiKey  = document.getElementById(`tkey-${pluginName}`).value.trim();
+  const urlPath = document.getElementById(`turl-${pluginName}`).value.trim();
+  const method  = document.getElementById(`tmethod-${pluginName}`).value;
+  const bodyRaw = document.getElementById(`tbody-${pluginName}`).value.trim();
+
+  if (!apiKey) { toast('Enter an API key first', 'error'); return; }
+  if (!urlPath) { toast('Enter an endpoint path', 'error'); return; }
+
+  const resultWrap  = document.getElementById(`tresult-${pluginName}`);
+  const statusEl    = document.getElementById(`tstatus-${pluginName}`);
+  const bodyOutEl   = document.getElementById(`tbody-out-${pluginName}`);
+  const imgGrid     = document.getElementById(`timg-${pluginName}`);
+
+  resultWrap.style.display = '';
+  bodyOutEl.innerHTML = `<span class="test-spinner"></span> Sending…`;
+  statusEl.innerHTML  = '';
+  imgGrid.innerHTML   = '';
+
+  try {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    };
+    if (method !== 'GET') {
+      try { opts.body = JSON.stringify(JSON.parse(bodyRaw)); }
+      catch(_) { opts.body = bodyRaw; }
+    }
+    const resp = await fetch(urlPath, opts);
+    const ok   = resp.ok;
+    statusEl.innerHTML = `<span class="tag ${ok?'tag-green':'tag-red'}">${resp.status} ${resp.statusText}</span>`;
+
+    let data;
+    const ct = resp.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      data = await resp.json();
+    } else {
+      data = await resp.text();
+    }
+
+    // Detect base64 images in response (SD-style)
+    if (data && typeof data === 'object' && Array.isArray(data.images)) {
+      bodyOutEl.textContent = JSON.stringify({...data, images: [`[${data.images.length} image(s) — preview below]`]}, null, 2);
+      imgGrid.innerHTML = data.images.map(b64 =>
+        `<img src="data:image/png;base64,${b64}" alt="result" />`
+      ).join('');
+    } else {
+      bodyOutEl.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    }
+  } catch(e) {
+    statusEl.innerHTML = `<span class="tag tag-red">Error</span>`;
+    bodyOutEl.textContent = e.message;
+  }
 }
 
 /* NAV */

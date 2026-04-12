@@ -1,6 +1,8 @@
+import copy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified  # ← 新增
 
 from core.database import AsyncSessionLocal, User
 
@@ -15,13 +17,13 @@ async def reset_all_quotas():
         users = result.scalars().all()
 
         for user in users:
-            quota = user.quota or {}
+            quota = copy.deepcopy(user.quota)  # ← 改这里
 
-            # 🔥 核心：所有 plugin 全部清零
             for plugin in quota:
                 quota[plugin]["used"] = 0
 
             user.quota = quota
+            flag_modified(user, "quota_json")  # ← 新增这行
 
         await db.commit()
 
@@ -34,6 +36,6 @@ def start_scheduler():
         trigger="cron",
         hour=0,
         minute=0,
-        timezone="Asia/Tokyo",  # 你现在在日本
+        timezone="Asia/Tokyo",
     )
     scheduler.start()
