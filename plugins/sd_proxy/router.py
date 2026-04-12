@@ -151,3 +151,12 @@ async def png_info(
     _quota=Depends(require_quota(PLUGIN_NAME)),
 ):
     return await _forward_request("/sdapi/v1/png-info", request, user, db)
+
+@router.post("/tagger/v1/interrogate")
+async def interrogate(
+        request: Request,
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+        _quota=Depends(require_quota(PLUGIN_NAME))
+):
+    return await _forward_request("/sdapi/v1/interrogate", request, user, db)
