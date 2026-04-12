@@ -99,8 +99,8 @@ from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.my_plugin import config
 
-#PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径。此时需要请求http://localhost:8080/api/v1/my_plugin/action，可设置为""，这样就是http://localhost:8080/action
-PLUGIN_PREFIX = ""
+#PLUGIN_PREFIX = "/api/v1/my_plugin"  # 挂载路径。此时需要请求http://localhost:8080/api/v1/my_plugin/action
+PLUGIN_PREFIX = ""  # 设置为""，此时请求http://localhost:8080/action
 PLUGIN_NAME = "my_plugin"  # 插件文件夹名，必须一致。
 router = APIRouter()
 
