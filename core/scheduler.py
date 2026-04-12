@@ -36,7 +36,7 @@ def start_scheduler():
         reset_all_quotas,
         trigger="cron",
         hour=0,
-        minute=0,
+        minute=35,
     )
     scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=31)
     scheduler.start()
