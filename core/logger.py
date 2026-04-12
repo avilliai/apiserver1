@@ -42,8 +42,9 @@ class ColorFormatter(logging.Formatter):
         # 普通日志：时间戳 + 级别 + 消息
         time_str = self.formatTime(record, "%H:%M:%S")
         return (
-            f"{GREY}{time_str}{RESET} "
-            f"{level_color}{record.levelname:<8}{RESET} "
+            f"{GREY}{time_str}{RESET} | "
+            f"{level_color}{record.levelname:<7}{RESET} | "
+            f"{CYAN}{record.name}{RESET}  "
             f"{record.getMessage()}"
         )
 
