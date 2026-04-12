@@ -38,6 +38,7 @@ api-gateway/
 │   ├── auth_utils.py       # JWT / 密码工具
 │   ├── quota.py            # 配额检查依赖 (require_quota)
 │   ├── admin.py            # 管理员接口
+│   ├── scheduler.py        # 定时刷新配额
 │   └── user.py             # 用户自助接口
 └── plugins/
 │   └── openai_proxy/       # 第一个插件
@@ -67,7 +68,7 @@ api-gateway/
 DISPLAY_NAME = "My Plugin"          # 前端显示名称
 DESCRIPTION = "Do something cool" # 描述
 
-# None = 不限制；整数 = 每用户调用上限
+# None = 不限制；整数 = 每用户每日调用上限
 QUOTA_DEFAULT = 100
 
 # 可选：供router内引用的其他配置
