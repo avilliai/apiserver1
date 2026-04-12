@@ -38,5 +38,5 @@ def start_scheduler():
         hour=0,
         minute=0,
     )
-    scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=29)
+    scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=31)
     scheduler.start()
