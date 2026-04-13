@@ -19,8 +19,8 @@ router = APIRouter()
 
 # ==================== 配置 ====================
 SAVE_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_ACCOUNTS_FILE = os.path.join(SAVE_DIR, "server_accounts.txt")
-SERVER_TOKENS_FILE = os.path.join(SAVE_DIR, "server_tokens.txt")
+SERVER_ACCOUNTS_FILE = os.path.join(SAVE_DIR, "server_accounts.json")
+
 
 # asyncio 锁（替代 threading.Lock）
 _SAVE_LOCK = asyncio.Lock()
@@ -30,17 +30,30 @@ _SAVE_LOCK = asyncio.Lock()
 
 async def save_batch_to_files(accounts):
     async with _SAVE_LOCK:
-        # 写完整信息
-        with open(SERVER_ACCOUNTS_FILE, "a", encoding="utf-8") as f:
-            for acc in accounts:
-                f.write(f"{acc['email']} | {acc['password']} | {acc['token']}\n")
+        # 读取已有 JSON 数据
+        if os.path.exists(SERVER_ACCOUNTS_FILE):
+            with open(SERVER_ACCOUNTS_FILE, "r", encoding="utf-8") as f:
+                try:
+                    existing = json.load(f)
+                except json.JSONDecodeError:
+                    existing = []
+        else:
+            existing = []
 
-        # 写 token
-        with open(SERVER_TOKENS_FILE, "a", encoding="utf-8") as f:
-            for acc in accounts:
-                f.write(f"{acc['token']}\n")
+        # 追加新账号（只保留三个字段）
+        for acc in accounts:
+            existing.append({
+                "email": acc["email"],
+                "password": acc["password"],
+                "token": acc["token"],
+            })
 
-    logger.info(f" 💾 保存 {len(accounts)} 个账号")
+        # 写回 JSON
+        with open(SERVER_ACCOUNTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+
+
+    logger.info(f"💾 保存 {len(accounts)} 个账号")
 
 
 # ==================== API ====================
