@@ -8,7 +8,7 @@ Plugin configuration. This file is the ONLY place you need to edit for this plug
 """
 
 DISPLAY_NAME = "OpenAI Proxy"
-DESCRIPTION = ("可用模型gemini-2.5-pro,gemini-3.0-pro,gpt-5,gpt-5.1,gpt-5.2,grok-4,grok-4.1-expert,grok-3,deepseek-r1,deepseek-v3,o4-mini")
+DESCRIPTION = ("可用模型gemini-2.5-pro,gemini-3.0-pro,gpt-5,gpt-5.1,gpt-5.2,grok-4,grok-4.1-expert,grok-3,deepseek-r1,deepseek-v3,4o-mini")
 
 # Set to None for unlimited, or an integer to cap per-user calls
 QUOTA_DEFAULT = 3000
