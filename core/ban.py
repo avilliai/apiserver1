@@ -17,7 +17,7 @@ BANLIST_FILE = "banlist.json"
 FAIL_WINDOW = 100          # 统计窗口（秒）
 MIN_REQUESTS = 6          # 窗口内至少请求多少次才触发判断（太少不统计）
 FAIL_RATE_THRESHOLD = 0.7 # 失败率超过此值触发封禁
-BAN_DURATION = None  #永不解封
+BAN_DURATION = 600        # 封禁时长（秒），10 分钟后自动解封
 
 FAIL_CODES = {404}
 
@@ -34,6 +34,7 @@ def cleanup_request_log():
         del _request_log[ip]
     if dead:
         logger.info(f"🧹 Cleaned {len(dead)} stale IPs from request log")
+
 def _load_banlist():
     if os.path.exists(BANLIST_FILE):
         with open(BANLIST_FILE, "r") as f:
@@ -44,16 +45,14 @@ def _save_banlist():
         json.dump(_banlist, f, indent=2)
 
 def _ban_ip(ip: str):
-    _banlist[ip] = "permanent"
+    _banlist[ip] = time.time() + BAN_DURATION
     _save_banlist()
-    logger.warning(f"🚫 Permanently banned IP: {ip}")
+    logger.warning(f"🚫 Banned IP: {ip} for {BAN_DURATION} seconds")
 
 def is_banned(ip: str) -> bool:
     until = _banlist.get(ip)
     if until is None:
         return False
-    if until == "permanent":
-        return True
     if time.time() < until:
         return True
     del _banlist[ip]
