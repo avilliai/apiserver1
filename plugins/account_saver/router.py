@@ -26,6 +26,7 @@ TOKEN_MANAGER_KEY = config.TOKEN_MANAGER_KEY
 # ==================== 工具函数 ====================
 
 async def forward_to_token_manager(accounts: list[dict]) -> dict:
+    # 直接传完整对象列表，TokenItem 需要 email/password/token
     payload = [
         {
             "email":    acc["email"],
@@ -38,7 +39,7 @@ async def forward_to_token_manager(accounts: list[dict]) -> dict:
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             TOKEN_MANAGER_URL,
-            json={"tokens": payload},
+            json={"tokens": payload},   # ✅ list[TokenItem]，不是 list[str]
             headers={"Authorization": f"Bearer {TOKEN_MANAGER_KEY}"},
             timeout=30.0,
         )
@@ -50,7 +51,6 @@ async def forward_to_token_manager(accounts: list[dict]) -> dict:
         )
 
     return resp.json()
-
 
 # ==================== API ====================
 
