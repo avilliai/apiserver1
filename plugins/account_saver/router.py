@@ -2,14 +2,15 @@
 plugins/account_saver/router.py
 """
 
-import os
-import asyncio
+import json
 from datetime import datetime
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
+from plugins.account_saver import config
 import logging
 logger = logging.getLogger(__name__)
 
@@ -18,42 +19,37 @@ PLUGIN_NAME = "account_saver"
 router = APIRouter()
 
 # ==================== 配置 ====================
-SAVE_DIR = os.path.dirname(os.path.abspath(__file__))
-SERVER_ACCOUNTS_FILE = os.path.join(SAVE_DIR, "server_accounts.json")
-
-
-# asyncio 锁（替代 threading.Lock）
-_SAVE_LOCK = asyncio.Lock()
+TOKEN_MANAGER_URL = config.TOKEN_MANAGER_URL
+TOKEN_MANAGER_KEY = config.TOKEN_MANAGER_KEY
 
 
 # ==================== 工具函数 ====================
 
-async def save_batch_to_files(accounts):
-    async with _SAVE_LOCK:
-        # 读取已有 JSON 数据
-        if os.path.exists(SERVER_ACCOUNTS_FILE):
-            with open(SERVER_ACCOUNTS_FILE, "r", encoding="utf-8") as f:
-                try:
-                    existing = json.load(f)
-                except json.JSONDecodeError:
-                    existing = []
-        else:
-            existing = []
+async def forward_to_token_manager(accounts: list[dict]) -> dict:
+    payload = [
+        {
+            "email":    acc["email"],
+            "password": acc["password"],
+            "token":    acc.get("token", ""),
+        }
+        for acc in accounts
+    ]
 
-        # 追加新账号（只保留三个字段）
-        for acc in accounts:
-            existing.append({
-                "email": acc["email"],
-                "password": acc["password"],
-                "token": acc["token"],
-            })
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            TOKEN_MANAGER_URL,
+            json={"tokens": payload},
+            headers={"Authorization": f"Bearer {TOKEN_MANAGER_KEY}"},
+            timeout=30.0,
+        )
 
-        # 写回 JSON
-        with open(SERVER_ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Token 管理器返回 {resp.status_code}: {resp.text}",
+        )
 
-
-    logger.info(f"💾 保存 {len(accounts)} 个账号")
+    return resp.json()
 
 
 # ==================== API ====================
@@ -75,28 +71,23 @@ async def save_accounts(
 
         if not accounts:
             await log_request(db, user, PLUGIN_NAME, "/save_accounts", 200)
-            return {"status": "success", "saved": 0}
+            return {"status": "failed", "saved": 0}
 
-        # 校验字段
         for acc in accounts:
             if not all(k in acc for k in ["email", "password", "token"]):
                 raise HTTPException(status_code=400, detail="字段必须包含 email/password/token")
 
-        await save_batch_to_files(accounts)
+        tm_result = await forward_to_token_manager(accounts)
 
         await log_request(
-            db,
-            user,
-            PLUGIN_NAME,
-            "/save_accounts",
-            200,
-            {"count": len(accounts)}
+            db, user, PLUGIN_NAME, "/save_accounts", 200,
+            {"count": len(accounts)},
         )
 
         return {
-            "status": "success",
-            "saved": len(accounts),
-            "message": f"已保存 {len(accounts)} 个账号"
+            "status":        "success",
+            "saved":         len(accounts),
+            "token_manager": tm_result,
         }
 
     except HTTPException:
@@ -110,5 +101,5 @@ async def save_accounts(
 async def health():
     return {
         "status": "ok",
-        "time": datetime.now().isoformat()
+        "time": datetime.now().isoformat(),
     }
