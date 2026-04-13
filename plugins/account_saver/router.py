@@ -35,7 +35,7 @@ async def forward_to_token_manager(accounts: list[dict]) -> dict:
         }
         for acc in accounts
     ]
-
+    print(payload)
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             TOKEN_MANAGER_URL,
