@@ -81,6 +81,7 @@ class AutoBanMiddleware(BaseHTTPMiddleware):
         ip = request.client.host
 
         if is_banned(ip):
+            logger.warning(f"{ip} is banned")
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
         response = await call_next(request)
