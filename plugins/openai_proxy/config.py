@@ -44,27 +44,4 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
-# 或
-import requests
-
-BASE = "http://apollodorus.xyz:8080/v1"
-apikey = "sk-xxxxx"
-
-r = requests.post(
-    BASE + "/chat/completions",
-    json={
-        "model": "4o-mini",
-        "messages": [
-            {"role": "user", "content": "Hello!"}
-        ]
-    },
-    headers={
-        "Authorization": f"Bearer {apikey}",
-        "Content-Type": "application/json"
-    },
-    timeout=1000
-)
-
-resp = r.json()
-print(resp["choices"][0]["message"]["content"])
 """
