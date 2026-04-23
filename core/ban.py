@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 
 BANLIST_FILE = "banlist.json"
 FAIL_WINDOW = 100          # 统计窗口（秒）
-MIN_REQUESTS = 6          # 窗口内至少请求多少次才触发判断（太少不统计）
+MIN_REQUESTS = 8          # 窗口内至少请求多少次才触发判断（太少不统计）
 FAIL_RATE_THRESHOLD = 0.7 # 失败率超过此值触发封禁
 BAN_DURATION = 600        # 封禁时长（秒），10 分钟后自动解封
 
 FAIL_CODES = {404}
-
+ip_white_list=["39.148.25.145"]
 
 _request_log: dict[str, list] = defaultdict(list)
 
@@ -71,7 +71,7 @@ def _record_and_check(ip: str, is_fail: bool):
         return  # 请求数不够，不判断
 
     fail_count = sum(1 for _, f in _request_log[ip] if f)
-    if fail_count / total >= FAIL_RATE_THRESHOLD:
+    if fail_count / total >= FAIL_RATE_THRESHOLD and str(ip) not in ip_white_list:
         _ban_ip(ip)
 
 
