@@ -34,7 +34,7 @@ EXAMPLE = """
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://apollodorus.xyz:8080/v1",
+    base_url="http://api.apollodorus.xyz/v1",
     api_key="sk-xxxx"
 )
 

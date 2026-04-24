@@ -22,7 +22,7 @@ DB_EXTRA_FIELDS = ["endpoint"]
 EXAMPLE = """
 import base64
 import requests
-BASE = "http://apollodorus.xyz:8080"
+BASE = "http://api.apollodorus.xyz"
 apikey='sk-xxxx'
 r= requests.post(
     BASE + "/sdapi/v1/txt2img",
