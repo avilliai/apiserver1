@@ -3,7 +3,7 @@
 高拓展性的api管理系统        
 **由于本人是前端苦手，故本项目首要目标是让开发者尽量避开前端工作。在增加新功能后，仅需在后端插件的config.py中稍作配置，前端即可自动更新**。
 
-<img width="2546" height="1394" alt="image" src="https://github.com/user-attachments/assets/88238b42-7d36-417c-85bc-005e8af99499" />
+![img.png](img.png)
 
 ---
 
