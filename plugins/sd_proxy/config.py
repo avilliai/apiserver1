@@ -4,11 +4,11 @@ plugins/sd_proxy/config.py
 Stable Diffusion Proxy 配置
 """
 
-DISPLAY_NAME = "Stable Diffusion Proxy"
-DESCRIPTION = "Proxy for SD WebUI APIs (txt2img, img2img, loras, models, png-info)"
+DISPLAY_NAME = "Stable Diffusion 图像生成"
+DESCRIPTION = "基于stable diffusion的图像生成"
 
 # 每个 API Key 每天 50 次
-QUOTA_DEFAULT = 20
+QUOTA_DEFAULT = 30
 
 # 统一转发到你的 SD 服务
 UPSTREAM_BASE_URL = "http://localhost:3529"
@@ -19,6 +19,12 @@ UPSTREAM_API_KEY = ""
 # 记录字段
 DB_EXTRA_FIELDS = ["endpoint"]
 
+POST_TEST = {
+    "headers": {"Authorization": f"Bearer apikey"},
+    "type": "post",
+    "end_point": "/sdapi/v1/txt2img",
+    "params": {"prompt": "1girl"}
+}
 EXAMPLE = """
 import base64
 import requests

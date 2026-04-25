@@ -30,6 +30,18 @@ UPSTREAM_API_KEY = ""
 # DB_EXTRA_FIELDS: informational, tracked in RequestLog.extra_json
 DB_EXTRA_FIELDS = ["model", "prompt_tokens", "completion_tokens"]
 
+POST_TEST = {
+    "headers": {"Authorization": f"Bearer apikey"},
+    "type": "post",
+    "end_point": "/v1/chat/completions",
+    "params": {
+    "model": "gpt-5.1",
+    "messages": [
+        {"role": "user", "content": "你好，简单介绍一下你自己"}
+    ]
+}
+}
+
 EXAMPLE = """
 from openai import OpenAI
 
@@ -44,4 +56,26 @@ response = client.chat.completions.create(
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
+
+# ====== 自己调用 ======
+import requests
+
+url = "https://api.apollodorus.xyz/v1/chat/completions"
+
+headers = {
+    "Authorization": "Bearer YOUR_API_KEY",
+    "Content-Type": "application/json"
+}
+
+data = {
+    "model": "gpt-4.1-mini",
+    "messages": [
+        {"role": "user", "content": "你好，简单介绍一下你自己"}
+    ]
+}
+
+response = requests.post(url, headers=headers, json=data)
+
+print(response.status_code)
+print(response.json())
 """

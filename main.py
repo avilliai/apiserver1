@@ -3,6 +3,7 @@ API Gateway - Main Entry Point
 Auto-discovers and registers all plugins from the plugins/ directory.
 Adding a new plugins: just create a new folder under plugins/ with router.py + config.py
 """
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import importlib, pkgutil, os, sys
@@ -29,7 +30,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="API Gateway", version="1.0.0",lifespan=lifespan)
+app = FastAPI(title="AP I", version="1.0.0",lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,13 +69,12 @@ load_plugins()
 async def health():
     return {"status": "ok"}
 
+
 @app.get("/api/plugins")
 async def list_plugins():
-    """Returns metadata for all loaded plugins (used by frontend for dynamic UI)."""
     plugins = []
     for finder, name, ispkg in pkgutil.iter_modules([PLUGINS_DIR]):
-        if not ispkg:
-            continue
+        if not ispkg: continue
         try:
             cfg = importlib.import_module(f"plugins.{name}.config")
             plugins.append({
@@ -83,6 +83,9 @@ async def list_plugins():
                 "description": getattr(cfg, "DESCRIPTION", ""),
                 "quota_default": getattr(cfg, "QUOTA_DEFAULT", None),
                 "example": getattr(cfg, "EXAMPLE", ""),
+
+                # ==== 增加这行 ====
+                "post_test": getattr(cfg, "POST_TEST", None),
             })
         except Exception:
             pass
@@ -99,3 +102,5 @@ if os.path.exists(FRONTEND_DIR):
     @app.get("/", include_in_schema=False)
     async def serve_index():
         return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)

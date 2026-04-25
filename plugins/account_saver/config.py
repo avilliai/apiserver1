@@ -7,7 +7,7 @@ Plugin configuration. This file is the ONLY place you need to edit for this plug
 - DB_EXTRA_FIELDS: optional metadata (informational, not auto-migrated)
 """
 
-DISPLAY_NAME = "account saver"
+DISPLAY_NAME = "注册机账号收集器"
 DESCRIPTION = "Unified OpenAI-compatible proxy. Routes Grok → :8000, GPT/Gemini/DeepSeek → :8001"
 
 #转发到上游token管理器
