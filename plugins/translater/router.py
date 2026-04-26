@@ -130,7 +130,7 @@ async def translate(
 
     translation = await _do_translate(text, direction)
 
-    await log_request(db, user, PLUGIN_NAME, "/v1/translate", 200, {
+    await log_request(db, user, PLUGIN_NAME, "/translate", 200, {
         "direction": direction,
         "input_chars": len(text),
         "output_chars": len(translation),
