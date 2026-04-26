@@ -15,7 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 PLUGIN_PREFIX = ""
-PLUGIN_NAME = "ai翻译"
+PLUGIN_NAME = "translater"
 router = APIRouter()
 
 # 复用 openai_proxy 的上游地址和 key

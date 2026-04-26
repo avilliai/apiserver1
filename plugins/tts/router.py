@@ -18,7 +18,7 @@ from plugins.tts.HololiveTTS import HoliveTTS
 logger = logging.getLogger(__name__)
 
 PLUGIN_PREFIX = ""
-PLUGIN_NAME = "文本转语音"
+PLUGIN_NAME = "tts"
 router = APIRouter()
 
 
