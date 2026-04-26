@@ -1,5 +1,5 @@
 DISPLAY_NAME = "Hololive TTS 文本转语音"
-DESCRIPTION = "文本转语言"
+DESCRIPTION = "文本转语言。可用角色查看【Example Code】页面"
 # 每个 API Key 每天 50 次
 QUOTA_DEFAULT = 3000
 

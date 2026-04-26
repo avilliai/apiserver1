@@ -194,7 +194,7 @@ class HoliveTTS:
         await self._submit(session_hash, speaker, text, language)
         audio_url = await self._poll(session_hash)
         # 修正之前的 Bug: 返回应该是音频字节而不是字符串URL
-        return await self._download(audio_url)
+        return audio_url
 
     async def synthesize_to_file(
         self,
