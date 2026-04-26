@@ -16,6 +16,18 @@ POST_TEST = {
         }
 }
 EXAMPLE = """
+'''
+可用角色
+['MoriCalliope', 'TakanashiKiara', 'NinomaeInanis', 'GawrGura', 'AmeliaWatson', 'IRyS', 
+'TsukumoSana', 'CeresFauna', 'OuroKronii', 'NanashiMumei', 'HakosBaelz', 'ShioriNovella', 
+'KosekiBijou', 'NerissaRavencroft', 'AyundaRisu', 'MoonaHoshinova', 'AiraniIofifteen', 
+'KureijiOllie', 'AnyaMelfissa', 'VestiaZeta', 'TokinoSora', 'SakuraMiko', 'HoshimachiSuisei', 
+'AZKi', 'YozoraMel', 'ShirakamiFubuki', 'NatsuiroMatsuri', 'AkiRosenthal', 'AkaiHaato', 
+'MinatoAqua', 'NakiriAyame', 'OozoraSubaru', 'NekomataOkayu', 'UsadaPekora', 'UruhaRushia', 
+'ShiranuiFlare', 'ShiroganeNoel', 'HoushouMarine', 'AmaneKanata', 'TsunomakiWatame', 'TokoyamiTowa', 
+'HimemoriLuna', 'YukihanaLamy', 'MomosuzuNene', 'OmaruPolka', 'LaplusDarknesss', 'TakaneLui', 
+'HakuiKoyori', 'SakamataChloe', 'IchijouRirika', 'JuufuuteiRaden']
+'''
 import base64
 import requests
 BASE = "http://api.apollodorus.xyz"
