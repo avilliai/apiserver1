@@ -72,7 +72,7 @@ async def health():
 
 @app.get("/api/plugins")
 async def list_plugins():
-    plugins = []
+    plugins =[]
     for finder, name, ispkg in pkgutil.iter_modules([PLUGINS_DIR]):
         if not ispkg: continue
         try:
@@ -82,9 +82,8 @@ async def list_plugins():
                 "display_name": getattr(cfg, "DISPLAY_NAME", name),
                 "description": getattr(cfg, "DESCRIPTION", ""),
                 "quota_default": getattr(cfg, "QUOTA_DEFAULT", None),
+                "rpm": getattr(cfg, "RPM", None),  # ==== 新增这行，将 RPM 输出 ====
                 "example": getattr(cfg, "EXAMPLE", ""),
-
-                # ==== 增加这行 ====
                 "post_test": getattr(cfg, "POST_TEST", None),
             })
         except Exception:
