@@ -10,8 +10,8 @@ POST_TEST = {
     "type": "post",
     "end_point": "/tts",
     "params": {
-            "text": "早上好，今天你起的好早",
-            "speaker": "AZKI",
+            "text": "こんにちは、世界！",
+            "speaker": "AZKi",
         "lang": "JP"
         }
 }
@@ -35,8 +35,8 @@ apikey='sk-xxxx'
 r= requests.post(
     BASE + "/tts",
     json = {
-            "text": "早上好，今天你起的好早",
-            "speaker": "AZKI",
+            "text": "こんにちは、世界！",
+            "speaker": "AZKi",
         "lang": "JP"
         },
     headers={"Authorization":f"Bearer {apikey}"},
