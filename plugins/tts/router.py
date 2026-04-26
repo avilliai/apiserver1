@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 
-tts=HoliveTTS()
+tts1=HoliveTTS()
 
 
 
@@ -47,7 +47,7 @@ async def tts(
         )
     await log_request(db, user, PLUGIN_NAME, "/tts", 200, {})
 
-    path=await tts.synthesize(
+    path=await tts1.synthesize(
             text=text,
             speaker=speaker,
             language=lang,
