@@ -1,23 +1,9 @@
 """
 core/quota.py — Reusable quota enforcement dependency for plugins.
-
-Supports two authentication methods transparently:
-  1. JWT Bearer token  (from /api/auth/login)
-  2. API Key Bearer    (sk-xxxx, created via /api/user/apikeys)
-
-Usage in a plugin router:
-    from core.quota import require_quota, get_current_user
-
-    @router.post("/chat")
-    async def chat(
-        req: ...,
-        user: User = Depends(get_current_user),
-        db: AsyncSession = Depends(get_db),
-        _quota: None = Depends(require_quota("openai_proxy")),
-    ):
-        ...
 """
 import importlib, pkgutil, os, hashlib
+import time
+from collections import defaultdict
 from datetime import datetime
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -29,13 +15,39 @@ from core.auth_utils import decode_token
 
 PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins")
 
-# Use HTTPBearer so we can inspect the token ourselves
 _bearer = HTTPBearer(auto_error=False)
+
+# 用于记录每个用户调用各个插件的时间戳，以实现 RPM 速率限制
+# 结构: { user_id: { plugin_name: [timestamp1, timestamp2, ...] } }
+_rpm_records: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+
+
+def cleanup_rpm_records():
+    """定期清理过期的速率限制记录，防止内存泄露"""
+    now = time.time()
+    empty_users =[]
+    for user_id, plugins_history in _rpm_records.items():
+        empty_plugins =[]
+        for plugin, history in plugins_history.items():
+            # 只保留过去 60 秒内的记录
+            valid_history = [ts for ts in history if now - ts < 60]
+            if valid_history:
+                plugins_history[plugin] = valid_history
+            else:
+                empty_plugins.append(plugin)
+
+        for plugin in empty_plugins:
+            del plugins_history[plugin]
+
+        if not plugins_history:
+            empty_users.append(user_id)
+
+    for user_id in empty_users:
+        del _rpm_records[user_id]
 
 
 def _hash_key(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
-
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
@@ -56,7 +68,6 @@ async def get_current_user(
         if not api_key:
             raise HTTPException(status_code=401, detail="Invalid or revoked API key")
 
-        # Update last_used_at (best-effort, don't fail the request if this fails)
         try:
             api_key.last_used_at = datetime.utcnow()
             await db.commit()
@@ -88,21 +99,45 @@ async def get_current_admin(user: User = Depends(get_current_user)) -> User:
 def require_quota(plugin_name: str):
     """
     Returns a FastAPI dependency that:
-    1. Lazy-inits the user's quota entry for `plugin_name`.
-    2. Checks if limit is reached (None = unlimited).
-    3. Increments used count.
+    1. Checks if RPM rate limit is exceeded (None = unmetered RPM).
+    2. Lazy-inits the user's quota entry for `plugin_name`.
+    3. Checks if global quota limit is reached (None = unlimited total).
+    4. Increments used count.
     """
     async def _check(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ):
+        try:
+            cfg = importlib.import_module(f"plugins.{plugin_name}.config")
+            default = getattr(cfg, "QUOTA_DEFAULT", None)
+            rpm_limit = getattr(cfg, "RPM", None)
+        except Exception:
+            default = None
+            rpm_limit = None
+
+        # --- 1. RPM 速率限制检查 ---
+        if rpm_limit is not None:
+            now = time.time()
+            history = _rpm_records[user.id][plugin_name]
+            # 筛选出最近 60 秒内的请求时间戳
+            history =[ts for ts in history if now - ts < 60.0]
+
+            if len(history) >= rpm_limit:
+                _rpm_records[user.id][plugin_name] = history  # 回写更新以清理旧记录
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit exceeded for {plugin_name}. Max {rpm_limit} requests per minute.",
+                )
+
+            # 未超限，加入当前时间戳
+            history.append(now)
+            _rpm_records[user.id][plugin_name] = history
+        # ---------------------------
+
+        # --- 2. Quota 总量检查 ---
         quota = user.quota
         if plugin_name not in quota:
-            try:
-                cfg = importlib.import_module(f"plugins.{plugin_name}.config")
-                default = getattr(cfg, "QUOTA_DEFAULT", None)
-            except Exception:
-                default = None
             quota[plugin_name] = {"used": 0, "limit": default}
 
         entry = quota[plugin_name]
