@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified  # ← 新增，确保 JSON 字段变更被追踪
 
 from core.database import get_db, User, ApiKey, RequestLog
 from core.auth_utils import decode_token
@@ -25,9 +26,9 @@ _rpm_records: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdic
 def cleanup_rpm_records():
     """定期清理过期的速率限制记录，防止内存泄露"""
     now = time.time()
-    empty_users =[]
+    empty_users = []
     for user_id, plugins_history in _rpm_records.items():
-        empty_plugins =[]
+        empty_plugins = []
         for plugin, history in plugins_history.items():
             # 只保留过去 60 秒内的记录
             valid_history = [ts for ts in history if now - ts < 60]
@@ -100,14 +101,24 @@ def require_quota(plugin_name: str):
     """
     Returns a FastAPI dependency that:
     1. Checks if RPM rate limit is exceeded (None = unmetered RPM).
-    2. Lazy-inits the user's quota entry for `plugin_name`.
-    3. Checks if global quota limit is reached (None = unlimited total).
-    4. Increments used count.
+    2. Re-fetches the user row with SELECT FOR UPDATE to serialize concurrent writes.
+    3. Lazy-inits the user's quota entry for `plugin_name`.
+    4. Checks if global quota limit is reached (None = unlimited total).
+    5. Increments used count atomically within the lock.
+
+    修复说明：
+    - 原实现直接使用 get_current_user 返回的 user 对象读写 quota，
+      与 reset_all_quotas（以及其他并发请求）之间存在读-改-写竞态：
+        CRON reset:  READ(used=5) → set used=0 → WRITE
+        并发请求:               READ(used=5) →            used+1=6 → WRITE  ← 覆盖了 reset
+    - 修复方式：在写 quota 前用 with_for_update() 重新查询，让数据库层
+      对该行加排他锁，所有并发写操作强制串行执行，消除竞态。
     """
     async def _check(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ):
+        # --- 读取插件配置 ---
         try:
             cfg = importlib.import_module(f"plugins.{plugin_name}.config")
             default = getattr(cfg, "QUOTA_DEFAULT", None)
@@ -116,15 +127,15 @@ def require_quota(plugin_name: str):
             default = None
             rpm_limit = None
 
-        # --- 1. RPM 速率限制检查 ---
+        # --- 1. RPM 速率限制检查（内存级，无需加 DB 锁）---
         if rpm_limit is not None:
             now = time.time()
             history = _rpm_records[user.id][plugin_name]
             # 筛选出最近 60 秒内的请求时间戳
-            history =[ts for ts in history if now - ts < 60.0]
+            history = [ts for ts in history if now - ts < 60.0]
 
             if len(history) >= rpm_limit:
-                _rpm_records[user.id][plugin_name] = history  # 回写更新以清理旧记录
+                _rpm_records[user.id][plugin_name] = history
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded for {plugin_name}. Max {rpm_limit} requests per minute.",
@@ -133,10 +144,18 @@ def require_quota(plugin_name: str):
             # 未超限，加入当前时间戳
             history.append(now)
             _rpm_records[user.id][plugin_name] = history
-        # ---------------------------
 
-        # --- 2. Quota 总量检查 ---
-        quota = user.quota
+        # --- 2. 重新查询并对该行加排他锁 ---
+        # 关键修复：不复用 get_current_user 里的 user 对象（可能是 stale 数据），
+        # 而是在当前 db session 内重新 SELECT FOR UPDATE，
+        # 确保读取的是最新数据，且写入前其他事务无法并发修改同一行。
+        result = await db.execute(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        locked_user = result.scalar_one()
+
+        # --- 3. Quota 总量检查 & 懒初始化 ---
+        quota = locked_user.quota  # 通过 property 反序列化，此时是最新值
         if plugin_name not in quota:
             quota[plugin_name] = {"used": 0, "limit": default}
 
@@ -145,15 +164,19 @@ def require_quota(plugin_name: str):
         used  = entry.get("used", 0)
 
         if limit is not None and used >= limit:
+            # 超限时也要释放锁（commit/rollback 均可释放 FOR UPDATE 锁）
+            await db.rollback()
             raise HTTPException(
                 status_code=429,
                 detail=f"Quota exceeded for {plugin_name}. Used: {used}/{limit}",
             )
 
+        # --- 4. 原子递增并写回 ---
         entry["used"] = used + 1
         quota[plugin_name] = entry
-        user.quota = quota
-        await db.commit()
+        locked_user.quota = quota          # 通过 property setter 序列化回 JSON
+        flag_modified(locked_user, "quota_json")  # 显式标记 JSON 字段已变更，防止 SQLAlchemy 漏追踪
+        await db.commit()                  # commit 同时释放 FOR UPDATE 锁
 
     return _check
 
