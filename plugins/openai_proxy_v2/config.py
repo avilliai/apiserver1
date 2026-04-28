@@ -13,7 +13,7 @@ DESCRIPTION = (
 )
 
 # Per-user daily quota (None = unlimited)
-QUOTA_DEFAULT = 500
+QUOTA_DEFAULT = 100
 
 # Single upstream for all v2 models
 UPSTREAM_BASE = "http://localhost:8007"
