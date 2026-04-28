@@ -1,10 +1,5 @@
 """
 plugins/openai_proxy_v2/router.py
-
-Proxies OpenAI-compatible requests to localhost:8007/v1 (v2 endpoint).
-Supports both streaming and non-streaming responses.
-Enforces per-user daily quota via core.quota.require_quota.
-All models use the provider/model-name format (e.g. "anthropic/claude-sonnet-4.6").
 """
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -18,14 +13,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-PLUGIN_PREFIX = "/v2"
+# 建议设为空，在下面的路由里手动写 /v2，或者设为 /v2，路由里不写 /v2。
+# 为了和你提供的第一个旧版 router 逻辑保持一致，我们这里设为 ""
+PLUGIN_PREFIX = ""
 PLUGIN_NAME = "openai_proxy_v2"
 
 router = APIRouter()
 
-
 async def _proxy_request(
-    path: str,
+    incoming_path: str, # 用于审计日志的路径 (例如 /v2/chat/completions)
+    upstream_path: str, # 实际转发给上游的路径 (例如 /v1/chat/completions)
     body: dict,
     user: User,
     db: AsyncSession,
@@ -34,8 +31,9 @@ async def _proxy_request(
     if not model:
         raise HTTPException(status_code=400, detail="'model' field is required")
 
-    # Upstream path always maps to /v1/...
-    upstream_url = f"{config.UPSTREAM_BASE}/v1{path}"
+    # 核心修改：确保转发到 localhost:8007/v1/...
+    # 假设 config.UPSTREAM_BASE 是 "http://localhost:8007"
+    upstream_url = f"{config.UPSTREAM_BASE}{upstream_path}"
     is_stream = body.get("stream", False)
 
     headers = {
@@ -43,7 +41,7 @@ async def _proxy_request(
         "Content-Type": "application/json",
     }
 
-    logger.info(f"[v2] Proxying model='{model}' -> {upstream_url} (stream={is_stream})")
+    logger.info(f"[v2] Proxying {incoming_path} -> {upstream_url} (model={model})")
 
     if is_stream:
         async def generate():
@@ -52,7 +50,6 @@ async def _proxy_request(
                     async with client.stream(
                         "POST", upstream_url, json=body, headers=headers
                     ) as resp:
-                        logger.info(f"[v2][STREAM] upstream status={resp.status_code}")
                         async for line in resp.aiter_lines():
                             if not line:
                                 continue
@@ -60,7 +57,6 @@ async def _proxy_request(
                 except Exception as e:
                     logger.error(f"[v2][STREAM ERROR] {e}")
                     raise
-
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     else:
@@ -73,7 +69,7 @@ async def _proxy_request(
             resp_json = {"error": resp.text}
 
         usage = resp_json.get("usage", {}) if isinstance(resp_json, dict) else {}
-        await log_request(db, user, PLUGIN_NAME, path, resp.status_code, {
+        await log_request(db, user, PLUGIN_NAME, incoming_path, resp.status_code, {
             "model": model,
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
@@ -96,7 +92,8 @@ async def chat_completions(
     _quota=Depends(require_quota(PLUGIN_NAME)),
 ):
     body = await request.json()
-    return await _proxy_request("/chat/completions", body, user, db)
+    # 转发时将 /v2 还原为 /v1
+    return await _proxy_request("/v2/chat/completions", "/v1/chat/completions", body, user, db)
 
 
 @router.post("/v2/completions")
@@ -107,7 +104,7 @@ async def completions(
     _quota=Depends(require_quota(PLUGIN_NAME)),
 ):
     body = await request.json()
-    return await _proxy_request("/completions", body, user, db)
+    return await _proxy_request("/v2/completions", "/v1/completions", body, user, db)
 
 
 @router.post("/v2/embeddings")
@@ -118,15 +115,12 @@ async def embeddings(
     _quota=Depends(require_quota(PLUGIN_NAME)),
 ):
     body = await request.json()
-    return await _proxy_request("/embeddings", body, user, db)
+    return await _proxy_request("/v2/embeddings", "/v1/embeddings", body, user, db)
 
 
 @router.get("/v2/models")
 async def list_models(user: User = Depends(get_current_user)):
-    """
-    Fetches the live model list from the upstream and returns it as-is.
-    Falls back to the static SUPPORTED_MODELS list if upstream is unavailable.
-    """
+    """获取上游真实模型列表"""
     upstream_models_url = f"{config.UPSTREAM_BASE}/v1/models"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -137,13 +131,6 @@ async def list_models(user: User = Depends(get_current_user)):
         if resp.status_code == 200:
             return resp.json()
     except Exception as e:
-        logger.warning(f"[v2] Failed to fetch upstream models: {e}, falling back to static list")
+        logger.warning(f"[v2] Failed to fetch upstream models: {e}")
 
-    # Static fallback
-    return {
-        "object": "list",
-        "data": [
-            {"id": model_id, "object": "model"}
-            for model_id in config.SUPPORTED_MODELS
-        ],
-    }
+    return {"object": "list", "data": []}
