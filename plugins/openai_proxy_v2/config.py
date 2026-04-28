@@ -19,7 +19,7 @@ QUOTA_DEFAULT = 1500
 UPSTREAM_BASE = "http://localhost:8007"
 
 # Your master API key injected into every upstream request
-UPSTREAM_API_KEY = ""
+UPSTREAM_API_KEY = "sdfa"
 
 # All supported models on this upstream
 SUPPORTED_MODELS = [
