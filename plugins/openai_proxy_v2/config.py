@@ -96,7 +96,7 @@ EXAMPLE = """
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://api.apollodorus.xyz/v2",
+    base_url="http://api.apollodorus.xyz/v2",
     api_key="sk-xxxx"
 )
 
