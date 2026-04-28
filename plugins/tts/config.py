@@ -26,7 +26,16 @@ EXAMPLE = """
 'MinatoAqua', 'NakiriAyame', 'OozoraSubaru', 'NekomataOkayu', 'UsadaPekora', 'UruhaRushia', 
 'ShiranuiFlare', 'ShiroganeNoel', 'HoushouMarine', 'AmaneKanata', 'TsunomakiWatame', 'TokoyamiTowa', 
 'HimemoriLuna', 'YukihanaLamy', 'MomosuzuNene', 'OmaruPolka', 'LaplusDarknesss', 'TakaneLui', 
-'HakuiKoyori', 'SakamataChloe', 'IchijouRirika', 'JuufuuteiRaden']
+'HakuiKoyori', 'SakamataChloe', 'IchijouRirika', 'JuufuuteiRaden',    
+"agnes_digital_爱丽数码_アグネスデジタル",
+"curren_chan_真机伶_カレンチャン",
+"matikane_fukukitaru_待兼福来_マチカネフクキタル",
+"matikane_tannhauser_待兼诗歌剧_マチカネタンホイサ",
+"mejiro_mcqueen_目白麦昆_メジロマックイーン",
+"natuki",
+"nice_nature_优秀素质_ナイスネイチャ",
+"rice_shower_米浴_ライスシャワー",
+"satono_diamond_里见光钻_サトノダイヤモンド"]
 '''
 import base64
 import requests
