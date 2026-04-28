@@ -28,7 +28,7 @@ DESCRIPTION = (
 )
 
 # 每日配额限制为 1500
-QUOTA_DEFAULT = 1500
+QUOTA_DEFAULT = 1000
 
 # 统一上游接口地址
 UPSTREAM_URL = "http://localhost:8007/v1"
