@@ -430,6 +430,10 @@
     .plugin-info-strip .pis-quota { font-family:var(--mono); font-size:10px; color:var(--text3); letter-spacing:1px; }
     .plugin-info-strip .pis-quota span { color:var(--accent3); font-weight:500; }
 
+    /* ─── BATCH SELECTION ───────────────────────── */
+    .row-selected td { background: rgba(154,212,214,0.10) !important; }
+    .row-selected:hover td { background: rgba(154,212,214,0.16) !important; }
+
     @media (max-width: 900px) {
       #sidebar { display:none; }
       #main { padding:20px; }
@@ -572,9 +576,71 @@
     <!-- ADMIN: USERS -->
     <div class="page" id="page-admin-users">
       <div class="page-header"><h1>User Management</h1><p>Manage users, quotas, and roles</p></div>
+
+      <!-- Batch Toolbar -->
+      <div class="card mb-24" id="batch-toolbar" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap">
+            Batch — <span id="batch-count" style="color:var(--accent3)">0</span> selected
+          </span>
+          <div style="flex:1;min-width:160px">
+            <select class="form-input" id="batch-plugin" style="padding:7px 11px;font-size:12px" onchange="onBatchPluginChange()">
+              <option value="">— Select Plugin —</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <input type="number" id="batch-limit-val" class="form-input" placeholder="limit (∞=blank)"
+              style="width:130px;padding:7px 11px;font-size:12px" min="0" />
+            <button class="btn btn-ghost btn-sm" onclick="batchSetLimit()">Set Limit</button>
+            <button class="btn btn-ghost btn-sm" onclick="batchResetUsed()">Reset Used</button>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="clearBatchSelection()" style="margin-left:auto">✕ Deselect All</button>
+        </div>
+      </div>
+
+      <!-- Filter Bar -->
+      <div class="card mb-24">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap;flex-shrink:0">Filter</span>
+          <select class="form-input" id="filter-plugin" style="flex:1;min-width:140px;padding:7px 11px;font-size:12px">
+            <option value="">All Plugins</option>
+          </select>
+          <select class="form-input" id="filter-op" style="width:140px;padding:7px 11px;font-size:12px">
+            <option value="">— Condition —</option>
+            <option value="remaining_lt">Remaining &lt;</option>
+            <option value="remaining_lte">Remaining ≤</option>
+            <option value="used_gt">Used &gt;</option>
+            <option value="pct_gt">Used % &gt;</option>
+            <option value="exhausted">Exhausted</option>
+            <option value="unlimited">Unlimited</option>
+          </select>
+          <input type="number" id="filter-val" class="form-input" placeholder="value"
+            style="width:100px;padding:7px 11px;font-size:12px" min="0" />
+          <button class="btn btn-primary btn-sm" onclick="applyFilter()">Apply</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearFilter()">Clear</button>
+          <span id="filter-result-badge" style="display:none;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap"></span>
+        </div>
+      </div>
+
+      <!-- User Table -->
       <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" id="select-all-cb" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)" onchange="toggleSelectAll(this.checked)" title="Select all visible" />
+            <span style="font-family:var(--mono);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text3)">Select All</span>
+          </div>
+        </div>
         <table class="data-table" id="admin-users-table">
-          <thead><tr><th>User</th><th>Role</th><th>Registered</th><th>Plugins</th><th></th></tr></thead>
+          <thead>
+            <tr>
+              <th style="width:32px"></th>
+              <th>User</th>
+              <th>Role</th>
+              <th>Registered</th>
+              <th>Plugins</th>
+              <th></th>
+            </tr>
+          </thead>
           <tbody></tbody>
         </table>
       </div>
@@ -1115,19 +1181,194 @@ async function revokeKey(id) {
 }
 
 /* ADMIN: USERS */
+// 原始用户列表（全量，用于筛选）
+let _allUsers = [];
+// 当前展示的用户（筛选后）
+let _visibleUsers = [];
+// 已选中的用户 id 集合
+let _selectedIds = new Set();
+
 async function loadAdminUsers() {
   try {
-    const users = await apiFetch('/api/admin/users');
-    document.querySelector('#admin-users-table tbody').innerHTML = users.map(u => `
-      <tr>
-        <td style="color:var(--text);font-weight:600;font-size:13.5px">${u.username}</td>
-        <td><span class="badge ${u.is_admin?'badge-admin':'badge-user'}">${u.is_admin?'admin':'user'}</span></td>
-        <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${fmt(u.created_at)}</td>
-        <td style="color:var(--text2)">${Object.keys(u.quota).length}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick='openUserModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Manage</button></td>
-      </tr>`).join('');
-  } catch(e) { toast(e.message,'error'); }
+    _allUsers = await apiFetch('/api/admin/users');
+    _populatePluginSelectors(_allUsers);
+    _visibleUsers = _allUsers;
+    _renderUsersTable(_visibleUsers);
+  } catch(e) { toast(e.message, 'error'); }
 }
+
+/** 从用户列表中收集所有插件名，填充筛选/批量下拉框 */
+function _populatePluginSelectors(users) {
+  const plugins = new Set();
+  users.forEach(u => Object.keys(u.quota || {}).forEach(p => plugins.add(p)));
+  const opts = ['<option value="">All Plugins</option>',
+    ...[...plugins].sort().map(p => `<option value="${p}">${p}</option>`)].join('');
+  document.getElementById('filter-plugin').innerHTML = opts;
+  const batchOpts = ['<option value="">— Select Plugin —</option>',
+    ...[...plugins].sort().map(p => `<option value="${p}">${p}</option>`)].join('');
+  document.getElementById('batch-plugin').innerHTML = batchOpts;
+}
+
+/** 渲染用户表格，保留已选中状态 */
+function _renderUsersTable(users) {
+  document.querySelector('#admin-users-table tbody').innerHTML = users.map(u => `
+    <tr id="urow-${u.id}" class="${_selectedIds.has(u.id) ? 'row-selected' : ''}">
+      <td style="padding:11px 6px 11px 10px">
+        <input type="checkbox" class="user-cb" data-uid="${u.id}"
+          style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)"
+          ${_selectedIds.has(u.id) ? 'checked' : ''}
+          onchange="toggleUserSelect(${u.id}, this.checked)" />
+      </td>
+      <td style="color:var(--text);font-weight:600;font-size:13.5px">${u.username}</td>
+      <td><span class="badge ${u.is_admin?'badge-admin':'badge-user'}">${u.is_admin?'admin':'user'}</span></td>
+      <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${fmt(u.created_at)}</td>
+      <td style="color:var(--text2)">${Object.keys(u.quota || {}).length}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='openUserModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Manage</button></td>
+    </tr>`).join('');
+  _syncSelectAllCheckbox();
+}
+
+/** 切换单个用户的勾选状态 */
+function toggleUserSelect(uid, checked) {
+  if (checked) _selectedIds.add(uid);
+  else _selectedIds.delete(uid);
+  const row = document.getElementById(`urow-${uid}`);
+  if (row) row.classList.toggle('row-selected', checked);
+  _syncBatchToolbar();
+  _syncSelectAllCheckbox();
+}
+
+/** 全选 / 取消全选（仅作用于当前可见行） */
+function toggleSelectAll(checked) {
+  _visibleUsers.forEach(u => {
+    if (checked) _selectedIds.add(u.id);
+    else _selectedIds.delete(u.id);
+    const row = document.getElementById(`urow-${u.id}`);
+    if (row) row.classList.toggle('row-selected', checked);
+    const cb = row && row.querySelector('.user-cb');
+    if (cb) cb.checked = checked;
+  });
+  _syncBatchToolbar();
+}
+
+/** 同步全选框的半选/全选/未选状态 */
+function _syncSelectAllCheckbox() {
+  const allCb = document.getElementById('select-all-cb');
+  if (!allCb) return;
+  const total = _visibleUsers.length;
+  const sel   = _visibleUsers.filter(u => _selectedIds.has(u.id)).length;
+  allCb.checked = sel > 0 && sel === total;
+  allCb.indeterminate = sel > 0 && sel < total;
+}
+
+/** 显示/隐藏批量操作栏 */
+function _syncBatchToolbar() {
+  const bar = document.getElementById('batch-toolbar');
+  const cnt = document.getElementById('batch-count');
+  const n = _selectedIds.size;
+  bar.style.display = n > 0 ? '' : 'none';
+  cnt.textContent = n;
+}
+
+function clearBatchSelection() {
+  _selectedIds.clear();
+  _renderUsersTable(_visibleUsers);
+  _syncBatchToolbar();
+}
+
+/** 批量操作：插件切换时清空 limit 输入框占位符提示 */
+function onBatchPluginChange() {}
+
+/** 批量设置 limit */
+async function batchSetLimit() {
+  const plugin = document.getElementById('batch-plugin').value;
+  const raw    = document.getElementById('batch-limit-val').value;
+  if (!plugin) { toast('请先选择插件', 'error'); return; }
+  if (!_selectedIds.size) { toast('未选中任何用户', 'error'); return; }
+  const limit = raw === '' ? null : parseInt(raw, 10);
+  const ids = [..._selectedIds];
+  let ok = 0, fail = 0;
+  await Promise.all(ids.map(async uid => {
+    try {
+      await apiFetch(`/api/admin/users/${uid}/quota`, {
+        method: 'POST',
+        body: JSON.stringify({ plugin, limit })
+      });
+      ok++;
+    } catch { fail++; }
+  }));
+  toast(`Set limit → ${ok} ok${fail ? ', ' + fail + ' failed' : ''}`, fail ? 'error' : 'success');
+  await loadAdminUsers();
+}
+
+/** 批量重置 used 为 0 */
+async function batchResetUsed() {
+  const plugin = document.getElementById('batch-plugin').value;
+  if (!plugin) { toast('请先选择插件', 'error'); return; }
+  if (!_selectedIds.size) { toast('未选中任何用户', 'error'); return; }
+  const ids = [..._selectedIds];
+  let ok = 0, fail = 0;
+  await Promise.all(ids.map(async uid => {
+    try {
+      await apiFetch(`/api/admin/users/${uid}/reset-quota?plugin=${encodeURIComponent(plugin)}`, { method: 'POST' });
+      ok++;
+    } catch { fail++; }
+  }));
+  toast(`Reset used → ${ok} ok${fail ? ', ' + fail + ' failed' : ''}`, fail ? 'error' : 'success');
+  await loadAdminUsers();
+}
+
+/** 应用筛选条件 */
+function applyFilter() {
+  const plugin = document.getElementById('filter-plugin').value;
+  const op     = document.getElementById('filter-op').value;
+  const val    = parseFloat(document.getElementById('filter-val').value);
+
+  // 无条件时直接展示全部
+  if (!plugin && !op) { clearFilter(); return; }
+
+  _visibleUsers = _allUsers.filter(u => {
+    const quota = u.quota || {};
+
+    // 若指定了插件但用户没有该插件配额，则排除
+    if (plugin && !(plugin in quota)) return false;
+
+    // 若只选了插件没选操作符，展示拥有该插件的所有用户
+    if (!op) return true;
+
+    const entry   = plugin ? quota[plugin] : null;
+    const used    = entry ? (entry.used  ?? 0)    : 0;
+    const limit   = entry ? (entry.limit ?? null) : null;
+    const remaining = limit === null ? Infinity : Math.max(0, limit - used);
+    const pct       = limit ? (used / limit) * 100 : 0;
+
+    switch (op) {
+      case 'remaining_lt':  return remaining < val;
+      case 'remaining_lte': return remaining <= val;
+      case 'used_gt':       return used > val;
+      case 'pct_gt':        return limit !== null && pct > val;
+      case 'exhausted':     return limit !== null && used >= limit;
+      case 'unlimited':     return limit === null;
+      default:              return true;
+    }
+  });
+
+  _renderUsersTable(_visibleUsers);
+
+  const badge = document.getElementById('filter-result-badge');
+  badge.style.display = '';
+  badge.textContent = `${_visibleUsers.length} / ${_allUsers.length} users`;
+}
+
+function clearFilter() {
+  document.getElementById('filter-plugin').value = '';
+  document.getElementById('filter-op').value = '';
+  document.getElementById('filter-val').value = '';
+  _visibleUsers = _allUsers;
+  _renderUsersTable(_visibleUsers);
+  document.getElementById('filter-result-badge').style.display = 'none';
+}
+
 function openUserModal(user) {
   const rows = Object.entries(user.quota).map(([plugin, {used, limit}]) => `
     <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
