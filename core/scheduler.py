@@ -2,6 +2,7 @@ import copy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from core.ban import cleanup_request_log
 from core.quota import cleanup_rpm_records
@@ -14,31 +15,39 @@ async def reset_all_quotas():
     """
     将所有用户的所有插件 used 计数归零。
 
-    修复：使用 with_for_update() 加行锁后再修改，避免与并发请求的
-    require_quota 产生写-写冲突（两者都先读后写同一行）。
+    与 WebUI（admin.py reset_user_quota）保持完全相同的写法：
+      1. SELECT ... FOR UPDATE 加行锁
+      2. 通过 @property 读出 quota dict
+      3. 修改后重新赋值（触发 @quota.setter 更新 quota_json）
+      4. 用 flag_modified 显式告知 SQLAlchemy 该列已变更
+         （原地修改 dict 内容后再赋回，ORM 有时无法自动检测到变化）
+      5. commit
 
-    注意：SQLite 不支持真正的行级锁（会退化为表锁），在 PostgreSQL/MySQL
-    下此锁能精确保护单行；SQLite 下相当于序列化整个事务，行为仍然正确。
+    WebUI 每次都能成功的原因正是 flag_modified 确保了脏标记，
+    scheduler 之前缺少这一步导致 commit 时 SQLAlchemy 认为列未变更而跳过写库。
     """
     print(f"🔥 [CRON] Reset quotas at {datetime.utcnow()}")
 
     async with AsyncSessionLocal() as db:
-        # with_for_update() 确保在我们读出并写回期间，
-        # 没有其他事务能同时修改这些行。
         result = await db.execute(select(User).with_for_update())
         users = result.scalars().all()
 
         for user in users:
-            quota = user.quota          # @property 解析 JSON
+            quota = user.quota  # @property 解析 JSON，得到最新数据
             if not quota:
                 continue
 
             for plugin in quota:
                 quota[plugin]["used"] = 0
 
-            # 直接赋值触发 @quota.setter，SQLAlchemy 会自动标记脏值，
-            # 无需再手动调用 flag_modified。
+            # 赋值触发 @quota.setter，将 dict 序列化回 quota_json
             user.quota = quota
+
+            # 关键：显式标记 quota_json 列为已修改。
+            # SQLAlchemy 对 Text 列做原地内容变更检测时依赖对象标识，
+            # 若 setter 序列化后的字符串与 ORM 内部跟踪的旧值引用相同，
+            # 有时不会自动标记 dirty，导致 commit 时跳过该行的 UPDATE。
+            flag_modified(user, "quota_json")
 
         await db.commit()
 
@@ -50,8 +59,8 @@ def start_scheduler():
     scheduler.add_job(
         reset_all_quotas,
         trigger="cron",
-        hour=4,
-        minute=1,
+        hour=11,
+        minute=59,
     )
     # 每天 00:31 清理 ban.py 内存日志
     scheduler.add_job(cleanup_request_log, trigger="cron", hour=0, minute=31)
