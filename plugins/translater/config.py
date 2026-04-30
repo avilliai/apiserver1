@@ -1,6 +1,6 @@
 
 DISPLAY_NAME = "ai翻译器"
-DESCRIPTION = "用ai将输入翻译为指定语言"
+DESCRIPTION = "用ai将输入翻译为指定语言。"
 # 每个 API Key 每天 50 次
 QUOTA_DEFAULT = 3000
 

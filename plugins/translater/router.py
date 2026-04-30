@@ -116,7 +116,7 @@ async def translate(
             "direction": "zh2en",
             "original": "...",
             "translation": "..."
-        }
+        }f
     """
     body = await request.json()
     text: str = body.get("text", "")
