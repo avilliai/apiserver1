@@ -13,7 +13,7 @@ DESCRIPTION = (
 )
 
 # Per-user daily quota (None = unlimited)
-QUOTA_DEFAULT = 1500
+QUOTA_DEFAULT = 100
 
 # Single upstream for all v2 models
 UPSTREAM_BASE = "http://localhost:8007"
@@ -96,7 +96,7 @@ EXAMPLE = """
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://api.apollodorus.xyz/v2",
+    base_url="http://api.apollodorus.xyz/v2",
     api_key="sk-xxxx"
 )
 
