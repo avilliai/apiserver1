@@ -20,11 +20,10 @@ router = APIRouter()
 
 # 复用 openai_proxy 的上游地址和 key
 from plugins.openai_proxy import config as openai_config
-from plugins.openai_proxy.router import resolve_upstream
 
 TRANSLATE_MODEL = "gpt-4o-mini"
-INTERNAL_UPSTREAM = resolve_upstream(TRANSLATE_MODEL)
-INTERNAL_URL = f"{INTERNAL_UPSTREAM}/v1/chat/completions"
+
+INTERNAL_URL = f"http://localhost:8001/v1/chat/completions"
 
 # ── 支持的翻译方向 ────────────────────────────────────────────────
 
