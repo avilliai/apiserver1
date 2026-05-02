@@ -1,7 +1,30 @@
 """
 core/quota.py — Reusable quota enforcement dependency for plugins.
+
+修复说明（竞态条件）
+─────────────────────────────────────────────────────────────────────────────
+问题根因：
+  1. SQLite + aiosqlite 不支持 SELECT FOR UPDATE。
+     该语句会被静默忽略——不报错、不加锁，并发写入毫无保护。
+
+  2. SQLAlchemy Session 内置 identity map（一级缓存）。
+     同一个 Session 内，对同一 user_id 执行第二次 SELECT，
+     SQLAlchemy 直接返回内存中已缓存的旧对象，根本不查数据库。
+     因此 scheduler 在 04:01 写入归零结果后，
+     require_quota 在同一 Session 里仍然读到归零前的 used 值，
+     再 +1 后提交，就把归零覆盖掉了。
+
+修复方案：
+  - 用 asyncio.Lock（每用户一把，存储在 database.py）替代无效的 FOR UPDATE。
+  - 拿锁后调用 db.expire_all()，强制使当前 Session 的 identity map 失效，
+    下一次访问 ORM 属性时必须重新查数据库，保证读到最新值。
+  - scheduler.py 的 reset_all_quotas 也改用同一把锁，
+    从而与 require_quota 互斥，彻底消除竞态窗口。
+─────────────────────────────────────────────────────────────────────────────
 """
-import importlib, os, hashlib
+import importlib
+import os
+import hashlib
 import time
 import asyncio
 from collections import defaultdict
@@ -11,7 +34,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from core.database import get_db, User, ApiKey, RequestLog
+from core.database import get_db, User, ApiKey, RequestLog, get_user_quota_lock
 from core.auth_utils import decode_token
 
 PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins")
@@ -19,7 +42,7 @@ PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"
 _bearer = HTTPBearer(auto_error=False)
 
 # RPM 内存记录：{ user_id: { plugin_name: [timestamp, ...] } }
-# 注意：RPM 本身是内存级限速，精度够用；总量配额必须走数据库行锁。
+# RPM 本身是内存级限速，精度够用；总量配额走数据库 + 应用层锁。
 _rpm_records: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 # 保护 _rpm_records 的异步锁，防止协程并发写同一列表
 _rpm_lock = asyncio.Lock()
@@ -100,20 +123,21 @@ def require_quota(plugin_name: str):
     """
     返回一个 FastAPI dependency，完成以下工作：
 
-    1. RPM 速率限制检查（内存级，异步锁保护）。
-    2. 用同一个 Session 重新加载 User 行并加行锁（SELECT ... FOR UPDATE），
-       保证并发请求不会读到同一份旧的 used 值。
-    3. 检查总量配额是否耗尽。
-    4. 原子递增 used 并提交。
+    1. RPM 速率限制检查（内存级，asyncio.Lock 保护）。
+    2. 获取该用户的应用层 quota 写锁（database.get_user_quota_lock）。
+    3. 拿锁后调用 db.expire_all()，强制使 Session identity map 失效，
+       保证下一步 SELECT 必须重新查数据库（读到 scheduler 可能刚写入的归零值）。
+    4. 重新 SELECT User 行，检查总量配额是否耗尽。
+    5. 原子递增 used 并提交。
 
-    关键修复：
-    - require_quota 内部不再依赖 get_current_user 传入的 user 对象（那个对象
-      属于另一个 Session，在本 Session 里提交对它的修改是无效的）。
-    - 改为用 user.id 在本 Session 内用 with_for_update() 重新查询，确保
-      读-改-写在同一个事务和同一个 Session 内完成。
+    关键设计：
+    - require_quota 与 scheduler.reset_all_quotas 共用同一把 per-user asyncio.Lock，
+      因此两者天然互斥——scheduler 持锁归零时，require_quota 必须等待；
+      require_quota 持锁递增时，scheduler 也必须等待。
+    - 不再依赖 SELECT FOR UPDATE（SQLite + aiosqlite 会静默忽略该语句）。
+    - 不再依赖 get_current_user 传入的 user 对象直接写库（跨 Session 无效）。
     """
     async def _check(
-        # 只从 get_current_user 取 user.id，不直接操作该对象
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ):
@@ -126,17 +150,22 @@ def require_quota(plugin_name: str):
             default_limit = None
             rpm_limit = None
 
+        # 必须在 expire_all() 之前把 user.id 取出为普通 int。
+        # expire_all() 会将 user 对象标记为 expired；之后若再访问 user.id，
+        # SQLAlchemy 会尝试同步懒加载，在 asyncio 上下文中触发
+        # MissingGreenlet 崩溃。取出后，此函数内不再访问 user 对象的任何属性。
+        user_id: int = user.id
+
         # ── 1. RPM 速率限制（内存，加锁）───────────────────────────────────
         if rpm_limit is not None:
             async with _rpm_lock:
                 now = time.time()
                 history = [
-                    ts for ts in _rpm_records[user.id][plugin_name]
+                    ts for ts in _rpm_records[user_id][plugin_name]
                     if now - ts < 60.0
                 ]
                 if len(history) >= rpm_limit:
-                    # 顺手写回清理后的列表
-                    _rpm_records[user.id][plugin_name] = history
+                    _rpm_records[user_id][plugin_name] = history
                     raise HTTPException(
                         status_code=429,
                         detail=(
@@ -145,48 +174,41 @@ def require_quota(plugin_name: str):
                         ),
                     )
                 history.append(now)
-                _rpm_records[user.id][plugin_name] = history
+                _rpm_records[user_id][plugin_name] = history
 
-        # ── 2 & 3 & 4. 配额检查 + 原子递增（数据库行锁）─────────────────────
-        #
-        # 必须在 *本 Session (db)* 内重新加载 user 行，并加 FOR UPDATE 行锁。
-        # 原因：
-        #   - get_current_user 使用的是另一个 Session 实例（FastAPI Depends
-        #     每次都会创建新 Session），直接在那个对象上修改再用本 db commit
-        #     是无效的——本 Session 根本没有追踪那个对象。
-        #   - with_for_update() 确保同一用户的并发请求串行化，避免
-        #     "同时读到 used=5，同时写入 used=6" 的丢失更新问题。
-        #
-        result = await db.execute(
-            select(User)
-            .where(User.id == user.id)
-            .with_for_update()          # 行锁：同一行的其他写事务必须等待
-        )
-        locked_user = result.scalar_one_or_none()
-        if not locked_user:
-            raise HTTPException(status_code=401, detail="User not found")
+        quota_lock = await get_user_quota_lock(user_id)
+        async with quota_lock:
+            # 强制使 Session identity map 失效，下一次 SELECT 必须查库
+            db.expire_all()
 
-        quota = locked_user.quota  # 通过 @property 解析 JSON，得到最新数据
-
-        # 懒初始化：首次使用该插件时写入默认配额
-        if plugin_name not in quota:
-            quota[plugin_name] = {"used": 0, "limit": default_limit}
-
-        entry = quota[plugin_name]
-        limit = entry.get("limit")
-        used = entry.get("used", 0)
-
-        if limit is not None and used >= limit:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Quota exceeded for {plugin_name}. Used: {used}/{limit}",
+            result = await db.execute(
+                select(User).where(User.id == user_id)
             )
+            locked_user = result.scalar_one_or_none()
+            if not locked_user:
+                raise HTTPException(status_code=401, detail="User not found")
 
-        # 递增并持久化
-        entry["used"] = used + 1
-        quota[plugin_name] = entry
-        locked_user.quota = quota   # 触发 @quota.setter → 更新 quota_json
-        await db.commit()
+            quota = locked_user.quota  # @property：每次调用都解析 JSON，返回新 dict
+
+            # 懒初始化：首次使用该插件时写入默认配额
+            if plugin_name not in quota:
+                quota[plugin_name] = {"used": 0, "limit": default_limit}
+
+            entry = quota[plugin_name]
+            limit = entry.get("limit")
+            used = entry.get("used", 0)
+
+            if limit is not None and used >= limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Quota exceeded for {plugin_name}. Used: {used}/{limit}",
+                )
+
+            # 递增并持久化
+            entry["used"] = used + 1
+            quota[plugin_name] = entry
+            locked_user.quota = quota  # @quota.setter：更新 quota_json
+            await db.commit()
 
     return _check
 

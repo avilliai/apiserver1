@@ -25,7 +25,7 @@ UPSTREAM_ROUTES = {
 }
 
 # Your master API key injected into every upstream request
-UPSTREAM_API_KEY = ""
+UPSTREAM_API_KEY = "endlesswork"
 
 # DB_EXTRA_FIELDS: informational, tracked in RequestLog.extra_json
 DB_EXTRA_FIELDS = ["model", "prompt_tokens", "completion_tokens"]

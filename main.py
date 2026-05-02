@@ -101,5 +101,15 @@ if os.path.exists(FRONTEND_DIR):
     @app.get("/", include_in_schema=False)
     async def serve_index():
         return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+
+import traceback
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()  # 强制打印到 stderr/stdout
+    return JSONResponse(status_code=500, detail=str(exc))
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
