@@ -2,7 +2,6 @@
 core/database.py — SQLAlchemy async setup + all core models
 """
 import json
-import asyncio
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
@@ -92,36 +91,3 @@ async def get_db():
             yield session
         finally:
             await session.close()
-
-
-# ── 应用层 Quota 写锁 ──────────────────────────────────────────────────────────
-#
-# 背景：SQLite + aiosqlite 不支持真正的行级锁（SELECT FOR UPDATE 被静默忽略）。
-# 为了保证同一用户的 quota 读-改-写操作串行化，改用 asyncio.Lock。
-#
-# _user_quota_locks : user_id → asyncio.Lock
-#   每个用户拥有独立的锁，用户之间互不影响。
-#
-# _quota_locks_guard : 保护 _user_quota_locks 字典本身的并发写入。
-#   asyncio 是单线程事件循环，理论上字典操作本身不会有数据竞争，
-#   但显式加锁使语义更清晰，且在引入多线程执行器时也能正确工作。
-#
-# 使用方法（在 require_quota 和 reset_all_quotas 中）：
-#   lock = await get_user_quota_lock(user_id)
-#   async with lock:
-#       db.expire_all()           # 使 Session 缓存失效，确保读到数据库最新值
-#       ...                       # 读 → 判断 → 改 → commit
-#
-_user_quota_locks: dict[int, asyncio.Lock] = {}
-_quota_locks_guard = asyncio.Lock()
-
-
-async def get_user_quota_lock(user_id: int) -> asyncio.Lock:
-    """
-    返回指定用户的 quota 写锁（懒初始化）。
-    该锁在整个进程生命周期内复用，由 _quota_locks_guard 保护初始化过程。
-    """
-    async with _quota_locks_guard:
-        if user_id not in _user_quota_locks:
-            _user_quota_locks[user_id] = asyncio.Lock()
-        return _user_quota_locks[user_id]
