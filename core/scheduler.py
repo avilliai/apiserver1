@@ -3,28 +3,36 @@ core/scheduler.py
 
 修复说明（定时配额归零不生效）
 ─────────────────────────────────────────────────────────────────────────────
-原问题：
-  reset_all_quotas 虽然已加 flag_modified，但依然无法与并发的
-  require_quota 互斥，导致 scheduler 写入的归零结果被后者覆盖。
+根因分析（最终版）：
 
-  根因：
-  1. SELECT FOR UPDATE 在 SQLite + aiosqlite 上被静默忽略，无任何加锁效果。
-  2. 原实现一次性锁住所有行、循环处理、最后统一 commit，
-     持锁时间长，与 require_quota 之间没有共享的互斥原语。
+  前端 reset-quota 端点（总是生效）的写法：
+      quota[plugin]["used"] = 0
+      user.quota = quota   ← setter 将 dict 序列化为新 JSON 字符串并赋给 quota_json
+      await db.commit()    ← SQLAlchemy 检测到 quota_json 字符串引用已变，标记 dirty，写库
 
-修复方案：
-  - 与 require_quota 共用 database.get_user_quota_lock(user_id)。
-  - 逐用户加锁、处理、单独 commit，缩短每把锁的持有时间。
-  - 拿锁后调用 db.refresh(user) 强制从数据库重新加载该行，
-    避免读到 Session 缓存中的旧值。
-  - 移除无效的 SELECT FOR UPDATE。
-  - 保留 flag_modified，确保 SQLAlchemy 检测到 Text 列变更。
+  旧 scheduler 的写法（不生效）多了一行：
+      flag_modified(user, "quota_json")
+
+  问题在于 flag_modified 传入的列名 "quota_json" 若与 ORM 模型中
+  实际定义的属性名不一致，调用会静默失败——不抛异常，但也不会
+  正确标记 dirty，commit 时跳过 UPDATE。
+
+  此外，即使列名正确，旧代码在 setter 已经生成新字符串对象的前提下，
+  flag_modified 是冗余的；但若 setter 实现有缺陷导致新旧字符串引用
+  相同，flag_modified 才是救命稻草——两者同时依赖，反而掩盖了
+  究竟是哪一侧出了问题。
+
+修复方案（仿照前端生效的 reset-quota 写法）：
+  1. 去掉 flag_modified，完全依赖 setter 生成新字符串对象触发 dirty tracking。
+  2. 用 import copy 做深拷贝，保证修改后的 dict 与 getter 返回的原始对象
+     不共享引用，setter 拿到的是全新对象，序列化结果必然是新字符串。
+  3. 其余并发安全机制（per-user asyncio.Lock、expire_all、逐用户 commit）保持不变。
 ─────────────────────────────────────────────────────────────────────────────
 """
+import copy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 from sqlalchemy import select
-from sqlalchemy.orm.attributes import flag_modified
 
 from core.ban import cleanup_request_log
 from core.quota import cleanup_rpm_records
@@ -37,48 +45,49 @@ async def reset_all_quotas():
     """
     将所有用户的所有插件 used 计数归零。
 
-    与 require_quota 共用 per-user asyncio.Lock，保证：
-      - scheduler 持锁归零时，require_quota 对同一用户的递增必须等待。
-      - require_quota 持锁递增时，scheduler 对同一用户的归零必须等待。
+    完全仿照前端 reset-quota 端点的写法（已验证生效）：
+      quota[plugin]["used"] = 0
+      user.quota = quota
+      await db.commit()
 
-    逐用户加锁 + 单独 commit，缩短每把锁的持有时间，减少对请求延迟的影响。
+    并发安全：与 require_quota 共用 per-user asyncio.Lock。
     """
     print(f"🔥 [CRON] Reset quotas at {datetime.utcnow()}")
 
-    # 第一步：在不加锁的情况下查出所有用户 ID，
-    # 避免在持有应用层锁时执行慢查询。
+    # 第一步：查出所有用户 ID（不加业务锁，避免慢查询影响持锁时间）
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User.id))
         user_ids = result.scalars().all()
 
-    # 第二步：逐用户加锁、重新加载、归零、提交。
+    # 第二步：逐用户加锁 → 加载 → 归零 → 提交
     for user_id in user_ids:
         quota_lock = await get_user_quota_lock(user_id)
         async with quota_lock:
             async with AsyncSessionLocal() as db:
-                # 不用 with_for_update()——SQLite 上无效，且此处已有应用层锁保护。
                 result = await db.execute(select(User).where(User.id == user_id))
                 user = result.scalar_one_or_none()
                 if user is None:
                     continue
 
-                quota = user.quota  # @property 解析 JSON，得到最新数据
-                if not quota:
+                # @property getter 每次都解析 JSON 返回新 dict
+                old_quota = user.quota
+                if not old_quota:
                     continue
 
-                for plugin in quota:
-                    quota[plugin]["used"] = 0
+                # 深拷贝，保证修改后的对象与 getter 返回值不共享引用。
+                # setter 拿到新 dict → 序列化为新字符串 → SQLAlchemy 检测到
+                # quota_json 的字符串引用已变 → 正确标记 dirty → commit 写库。
+                new_quota = copy.deepcopy(old_quota)
+                for plugin in new_quota:
+                    new_quota[plugin]["used"] = 0
 
-                # 赋值触发 @quota.setter，将 dict 序列化回 quota_json
-                user.quota = quota
+                # 触发 @quota.setter，将 new_quota 序列化写入 quota_json
+                user.quota = new_quota
 
-                # 显式标记 quota_json 列为已修改。
-                # SQLAlchemy 对 Text 列做原地内容变更检测时依赖对象标识，
-                # setter 序列化后若字符串引用未变，ORM 有时不会自动标记 dirty，
-                # 导致 commit 时跳过该行的 UPDATE。
-                flag_modified(user, "quota_json")
-
+                # ↑ 与前端 reset-quota 端点完全相同的三行操作，不再依赖
+                #   flag_modified（其列名若有误会静默失败）。
                 await db.commit()
+                print(f"  ✓ user_id={user_id} quota reset")
 
     print("✅ All quotas reset")
 
