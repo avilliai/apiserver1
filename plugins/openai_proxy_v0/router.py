@@ -31,8 +31,6 @@ async def _proxy_request(
     if not model:
         raise HTTPException(status_code=400, detail="'model' field is required")
 
-    # 核心修改：确保转发到 localhost:8007/v1/...
-    # 假设 config.UPSTREAM_BASE 是 "http://localhost:8007"
     upstream_url = f"{config.UPSTREAM_BASE}{upstream_path}"
     is_stream = body.get("stream", False)
 
@@ -68,7 +66,11 @@ async def _proxy_request(
         except Exception:
             resp_json = {"error": resp.text}
 
-        usage = resp_json.get("usage", {}) if isinstance(resp_json, dict) else {}
+        usage_raw = resp_json.get("usage") if isinstance(resp_json, dict) else {}
+
+        # 2. 核心修复：如果 usage_raw 是 None，则强制变为 {}
+        usage = usage_raw or {}
+
         await log_request(db, user, PLUGIN_NAME, incoming_path, resp.status_code, {
             "model": model,
             "prompt_tokens": usage.get("prompt_tokens", 0),
