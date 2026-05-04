@@ -1,26 +1,5 @@
 """
 core/quota.py — Reusable quota enforcement dependency for plugins.
-
-修复说明（竞态条件）
-─────────────────────────────────────────────────────────────────────────────
-问题根因：
-  1. SQLite + aiosqlite 不支持 SELECT FOR UPDATE。
-     该语句会被静默忽略——不报错、不加锁，并发写入毫无保护。
-
-  2. SQLAlchemy Session 内置 identity map（一级缓存）。
-     同一个 Session 内，对同一 user_id 执行第二次 SELECT，
-     SQLAlchemy 直接返回内存中已缓存的旧对象，根本不查数据库。
-     因此 scheduler 在 04:01 写入归零结果后，
-     require_quota 在同一 Session 里仍然读到归零前的 used 值，
-     再 +1 后提交，就把归零覆盖掉了。
-
-修复方案：
-  - 用 asyncio.Lock（每用户一把，存储在 database.py）替代无效的 FOR UPDATE。
-  - 拿锁后调用 db.expire_all()，强制使当前 Session 的 identity map 失效，
-    下一次访问 ORM 属性时必须重新查数据库，保证读到最新值。
-  - scheduler.py 的 reset_all_quotas 也改用同一把锁，
-    从而与 require_quota 互斥，彻底消除竞态窗口。
-─────────────────────────────────────────────────────────────────────────────
 """
 import importlib
 import os
@@ -41,31 +20,32 @@ PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"
 
 _bearer = HTTPBearer(auto_error=False)
 
-# RPM 内存记录：{ user_id: { plugin_name: [timestamp, ...] } }
-# RPM 本身是内存级限速，精度够用；总量配额走数据库 + 应用层锁。
 _rpm_records: dict[int, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-# 保护 _rpm_records 的异步锁，防止协程并发写同一列表
 _rpm_lock = asyncio.Lock()
 
 
-def cleanup_rpm_records():
-    """定期清理过期的 RPM 记录，防止内存无限增长。由 scheduler 每 10 分钟调用一次。"""
-    now = time.time()
-    empty_users = []
-    for user_id, plugins_history in _rpm_records.items():
-        empty_plugins = []
-        for plugin, history in plugins_history.items():
-            valid = [ts for ts in history if now - ts < 60]
-            if valid:
-                plugins_history[plugin] = valid
-            else:
-                empty_plugins.append(plugin)
-        for plugin in empty_plugins:
-            del plugins_history[plugin]
-        if not plugins_history:
-            empty_users.append(user_id)
-    for user_id in empty_users:
-        del _rpm_records[user_id]
+async def cleanup_rpm_records():
+    """
+    定期清理过期的 RPM 记录，防止内存无限增长。由 scheduler 每 10 分钟调用一次。
+    注意：必须是 async def 并在锁的保护下执行，否则 APScheduler 的后台线程会与主协程产生严重的竞态条件！
+    """
+    async with _rpm_lock:
+        now = time.time()
+        empty_users =[]
+        for user_id, plugins_history in _rpm_records.items():
+            empty_plugins =[]
+            for plugin, history in plugins_history.items():
+                valid = [ts for ts in history if now - ts < 60]
+                if valid:
+                    plugins_history[plugin] = valid
+                else:
+                    empty_plugins.append(plugin)
+            for plugin in empty_plugins:
+                del plugins_history[plugin]
+            if not plugins_history:
+                empty_users.append(user_id)
+        for user_id in empty_users:
+            del _rpm_records[user_id]
 
 
 def _hash_key(raw: str) -> str:
