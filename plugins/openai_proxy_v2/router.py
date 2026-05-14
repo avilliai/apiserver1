@@ -45,7 +45,7 @@ async def _proxy_request(
 
     if is_stream:
         async def generate():
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=None) as client:
                 try:
                     async with client.stream(
                         "POST", upstream_url, json=body, headers=headers
@@ -60,7 +60,7 @@ async def _proxy_request(
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     else:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=None) as client:
             resp = await client.post(upstream_url, json=body, headers=headers)
 
         try:
