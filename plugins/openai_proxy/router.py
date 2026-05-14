@@ -109,7 +109,7 @@ async def _proxy_request(
         except Exception:
             resp_json = {"error": resp.text}
 
-        usage = resp_json.get("usage", {}) if isinstance(resp_json, dict) else {}
+        usage = (resp_json.get("usage") or {}) if isinstance(resp_json, dict) else {}
         await log_request(db, user, effective_plugin, path, resp.status_code, {
             "model": model,
             "prompt_tokens": usage.get("prompt_tokens", 0),
