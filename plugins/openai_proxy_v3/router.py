@@ -26,7 +26,7 @@ from plugins.openai_proxy_v3 import config
 import logging
 
 logger = logging.getLogger(__name__)
-
+PLUGIN_PREFIX = ""
 PLUGIN_NAME = "openai_proxy_v3"
 
 router = APIRouter()
