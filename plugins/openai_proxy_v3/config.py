@@ -54,7 +54,7 @@ POST_TEST = {
     "end_point": "/v3/chat/completions",
     "params": {
         "model": "Pegasus/gemini-pro",
-        #其他模型Pegasus/gemini-flash，Pegasus/claude-sonnet，Pegasus/claude-opus，Pegasus/gemini-2.5-pro，Pegasus/gpt-5
+
         "messages": [
             {"role": "user", "content": "你好，简单介绍一下你自己"}
         ],
@@ -68,6 +68,7 @@ client = OpenAI(
     base_url="http://api.apollodorus.xyz/v3",
     api_key="sk-xxxx"
 )
+# 可用模型Pegasus/gemini-flash，Pegasus/claude-sonnet，Pegasus/claude-opus，Pegasus/gemini-2.5-pro，Pegasus/gpt-5
 
 # 使用 v3 专属端点
 response = client.chat.completions.create(
