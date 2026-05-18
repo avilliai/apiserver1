@@ -10,9 +10,7 @@ Supports both streaming and non-streaming responses.
   转发到 V2_UPSTREAM_BASE，请求路径保持 /v1/...（上游接受标准 OpenAI 格式）
 - V3 模型（Pegasus/ 前缀）：从 "openai_proxy_v3" bucket 扣除，
   转发到 localhost:8011，转发前剥离 "Pegasus/" 前缀
-
-quota.py 未做任何修改，通过直接 await 调用 require_quota() 返回的内部
-_check 函数实现运行时动态切换 plugin_name。
+- 特殊 V2 -> V1 模型映射：将部分 v2 上游模型转为 v1 配额，屏蔽带斜杠的原始模型名。
 """
 import asyncio
 
@@ -38,6 +36,26 @@ V3_PLUGIN_NAME = "openai_proxy_v3"
 _V2_MODELS: set[str] = set(v2_config.SUPPORTED_MODELS)
 _V3_MODELS: set[str] = set(v3_config.SUPPORTED_MODELS)   # 均带 "Pegasus/" 前缀
 
+# ================= 核心修改：特殊 v2 模型映射 =================
+# 在 v1 的路由和配额中，将其伪装为短名称（扣除 v1 配额），实际转发给 v2。
+SPECIAL_V2_TO_V1_MODELS = {
+    "qwen3.6-27b": "alibaba/qwen3.6-27b",
+    "qwen3.6-35b-a3b": "alibaba/qwen3.6-35b-a3b",
+    "qwen3.6-flash": "alibaba/qwen3.6-flash",
+    "gpt-oss-120b": "openai/gpt-oss-120b",
+    "mistral-small-4-119b": "mistral/mistral-small-4-119b",
+    "glm-4.7-flash": "zai/glm-4.7-flash",
+    "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
+    "trinity-large-thinking": "arcee/trinity-large-thinking",
+    "nemotron-3-super-120b-a12b": "nvidia/nemotron-3-super-120b-a12b",
+    "mimo-v2-flash": "xiaomi/mimo-v2-flash",
+    "step-3.5-flash": "stepfun/step-3.5-flash",
+}
+
+SPECIAL_V2_LONG_NAMES = {v.lower() for v in SPECIAL_V2_TO_V1_MODELS.values()}
+REVERSE_SPECIAL_V2_MODELS = {v.lower(): k for k, v in SPECIAL_V2_TO_V1_MODELS.items()}
+# ==========================================================
+
 router = APIRouter()
 
 
@@ -47,20 +65,26 @@ def _resolve(model: str) -> tuple[str, str, str]:
 
     优先级：
       1. Pegasus/ 前缀 → v3 上游 (localhost:8011)
-      2. v2 精确匹配   → v2 上游
-      3. v1 前缀路由表 → v1 上游
-      4. fallback      → v1 最后一个上游
+      2. 特殊 v2 模型映射 → v2 上游，但使用 v1 插件配额
+      3. v2 精确匹配   → v2 上游
+      4. v1 前缀路由表 → v1 上游
+      5. fallback      → v1 最后一个上游
     """
-    # ── v3：Pegasus/ 前缀判断 ────────────────────────────────────────────────
+    model_lower = model.lower()
+
+    # ── 1. v3：Pegasus/ 前缀判断 ──────────────────────────────────────────────
     if model in _V3_MODELS or model.startswith(v3_config.MODEL_PREFIX):
         return v3_config.UPSTREAM_BASE, v3_config.UPSTREAM_API_KEY, V3_PLUGIN_NAME
 
-    # ── v2：精确匹配 ─────────────────────────────────────────────────────────
-    if model.lower() in _V2_MODELS:
+    # ── 2. v2 -> v1 特殊模型映射（不论请求的是短名称还是长名称，统统扣 v1 配额）──
+    if model_lower in SPECIAL_V2_TO_V1_MODELS or model_lower in SPECIAL_V2_LONG_NAMES:
+        return v2_config.UPSTREAM_BASE, v2_config.UPSTREAM_API_KEY, PLUGIN_NAME
+
+    # ── 3. v2：精确匹配 ────────────────────────────────────────────────────────
+    if model_lower in _V2_MODELS:
         return v2_config.UPSTREAM_BASE, v2_config.UPSTREAM_API_KEY, V2_PLUGIN_NAME
 
-    # ── v1：前缀路由 ─────────────────────────────────────────────────────────
-    model_lower = model.lower()
+    # ── 4. v1：前缀路由 ────────────────────────────────────────────────────────
     for prefix, url in config.UPSTREAM_ROUTES.items():
         if model_lower.startswith(prefix):
             return url, config.UPSTREAM_API_KEY, PLUGIN_NAME
@@ -73,12 +97,21 @@ def _prepare_body(body: dict, effective_plugin: str) -> dict:
     """
     根据目标插件对请求体做必要的预处理。
     v3：剥离模型名中的 "Pegasus/" 前缀，上游只认裸名。
+    特殊 v2：若用户传入无厂商前缀的短名称，这里给它拼上长名称原样发给上游。
     其他插件：原样返回。
     """
+    model = body.get("model", "")
+    model_lower = model.lower()
+
+    # 处理 v3 剥离
     if effective_plugin == V3_PLUGIN_NAME:
-        model = body.get("model", "")
         if model.startswith(v3_config.MODEL_PREFIX):
             return {**body, "model": model[len(v3_config.MODEL_PREFIX):]}
+
+    # 处理特殊 v2 短名称 -> 长名称回填
+    if model_lower in SPECIAL_V2_TO_V1_MODELS:
+        return {**body, "model": SPECIAL_V2_TO_V1_MODELS[model_lower]}
+
     return body
 
 
@@ -96,7 +129,7 @@ async def _proxy_request(
     upstream_url = f"{upstream_base}{path}"
     is_stream = body.get("stream", False)
 
-    # 对 v3 模型剥离前缀后再转发
+    # 动态构建转发的请求体 (替换名字等预处理)
     upstream_body = _prepare_body(body, effective_plugin)
 
     # ── 动态配额检查 ──────────────────────────────────────────────────────────
@@ -109,7 +142,7 @@ async def _proxy_request(
     }
 
     logger.info(
-        f"Proxying '{model}' -> {upstream_url} "
+        f"Proxying '{model}' (effective target: '{upstream_body.get('model')}') -> {upstream_url} "
         f"(plugin={effective_plugin}, stream={is_stream})"
     )
 
@@ -142,7 +175,7 @@ async def _proxy_request(
 
         usage = (resp_json.get("usage") or {}) if isinstance(resp_json, dict) else {}
         await log_request(db, user, effective_plugin, path, resp.status_code, {
-            "model": model,   # 日志保留原始带前缀名，便于追溯
+            "model": model,   # 日志保留用户原始请求的名（例如短名称），便于追溯
             "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0),
             "stream": False,
@@ -192,7 +225,7 @@ async def embeddings(
 async def list_models(user: User = Depends(get_current_user)):
     """
     从所有上游（v1、v2、v3）并发拉取模型列表并合并去重。
-    v3 模型在返回时恢复 Pegasus/ 前缀，与上游裸名区分。
+    特殊 v2 模型的 ID 在返回时会被替换为其对应的短名称。
     """
 
     async def fetch_models(base_url: str, api_key: str, prefix: str = "") -> list:
@@ -234,6 +267,14 @@ async def list_models(user: User = Depends(get_current_user)):
     for models in results:
         for m in models:
             if "id" in m:
-                merged[m["id"]] = m
+                model_id = m["id"]
+
+                # 若为特殊拦截的 v2 模型，将其长名替换为短名，隐身效果拉满
+                if model_id.lower() in REVERSE_SPECIAL_V2_MODELS:
+                    short_name = REVERSE_SPECIAL_V2_MODELS[model_id.lower()]
+                    m["id"] = short_name
+                    merged[short_name] = m
+                else:
+                    merged[model_id] = m
 
     return {"object": "list", "data": list(merged.values())}
