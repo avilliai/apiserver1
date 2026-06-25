@@ -58,7 +58,7 @@ async def _forward_request(
                            'width': 1024, 'height': 1536, 'restore_faces': False, 'tiling': False,
                            'sampler_name': 'Euler a', 'scheduler': 'Automatic', 'clip_skip_steps': 2,
                            'override_settings': {'CLIP_stop_at_last_layers': 2,
-                                                 'sd_model_checkpoint': 'waillustriousSDXL_v170.safetensors'},
+                                                 'sd_model_checkpoint': 'waillustriousSDXL_v160.safetensors'},
                            'override_settings_restore_afterwards': False}
         for key, value in ideal_structure.items():
             if key not in body:
