@@ -52,7 +52,7 @@ client = OpenAI(
 
 # Chat completion
 response = client.chat.completions.create(
-    model="grok-4",  # 有其他模型，很多，懒得写，自己试去吧
+    model="gpt5",  # 有其他模型，很多，懒得写，自己试去吧
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)

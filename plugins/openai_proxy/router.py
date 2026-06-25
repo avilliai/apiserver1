@@ -22,36 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
 from plugins.openai_proxy import config
-from plugins.openai_proxy_v2 import config as v2_config
-from plugins.openai_proxy_v3 import config as v3_config
+
 import logging
 
 logger = logging.getLogger(__name__)
 
 PLUGIN_PREFIX = ""
 PLUGIN_NAME = "openai_proxy"
-V2_PLUGIN_NAME = "openai_proxy_v2"
-V3_PLUGIN_NAME = "openai_proxy_v3"
 
-_V2_MODELS: set[str] = set(v2_config.SUPPORTED_MODELS)
-_V3_MODELS: set[str] = set(v3_config.SUPPORTED_MODELS)   # 均带 "Pegasus/" 前缀
 
-# ================= 核心修改：特殊 v2 短名称映射 =================
-# 当用户请求短名称时，将其转往 v2 上游但扣除 v1 配额。
-# 用户请求长名称时不受影响，正常扣除 v2 配额。
-SPECIAL_V2_TO_V1_MODELS = {
-    "qwen3.6-27b": "alibaba/qwen3.6-27b",
-    "qwen3.6-35b-a3b": "alibaba/qwen3.6-35b-a3b",
-    "qwen3.6-flash": "alibaba/qwen3.6-flash",
-    "gpt-oss-120b": "openai/gpt-oss-120b",
-    "mistral-small-4-119b": "mistral/mistral-small-4-119b",
-    "glm-4.7-flash": "zai/glm-4.7-flash",
-    "deepseek-v4-flash": "deepseek/deepseek-v4-flash",
-    "trinity-large-thinking": "arcee/trinity-large-thinking",
-    "nemotron-3-super-120b-a12b": "nvidia/nemotron-3-super-120b-a12b",
-    "mimo-v2-flash": "xiaomi/mimo-v2-flash",
-    "step-3.5-flash": "stepfun/step-3.5-flash",
-}
+
 # ==========================================================
 
 router = APIRouter()
@@ -70,18 +50,6 @@ def _resolve(model: str) -> tuple[str, str, str]:
     """
     model_lower = model.lower()
 
-    # ── 1. v3：Pegasus/ 前缀判断 ──────────────────────────────────────────────
-    if model in _V3_MODELS or model.startswith(v3_config.MODEL_PREFIX):
-        return v3_config.UPSTREAM_BASE, v3_config.UPSTREAM_API_KEY, V3_PLUGIN_NAME
-
-    # ── 2. v2 -> v1 特殊短名称（仅短名称走 v1 计费）─────────────────────────
-    if model_lower in SPECIAL_V2_TO_V1_MODELS:
-        return v2_config.UPSTREAM_BASE, v2_config.UPSTREAM_API_KEY, PLUGIN_NAME
-
-    # ── 3. v2：精确匹配 (长名称如 alibaba/qwen3.6-flash 走此处，正常 v2 计费) ──
-    if model_lower in _V2_MODELS:
-        return v2_config.UPSTREAM_BASE, v2_config.UPSTREAM_API_KEY, V2_PLUGIN_NAME
-
     # ── 4. v1：前缀路由 ────────────────────────────────────────────────────────
     for prefix, url in config.UPSTREAM_ROUTES.items():
         if model_lower.startswith(prefix):
@@ -96,16 +64,8 @@ def _prepare_body(body: dict, effective_plugin: str) -> dict:
     根据目标插件对请求体做必要的预处理。
     """
     model = body.get("model", "")
-    model_lower = model.lower()
 
-    # 处理 v3 剥离
-    if effective_plugin == V3_PLUGIN_NAME:
-        if model.startswith(v3_config.MODEL_PREFIX):
-            return {**body, "model": model[len(v3_config.MODEL_PREFIX):]}
 
-    # 处理特殊 v2 短名称 -> 长名称回填
-    if effective_plugin == PLUGIN_NAME and model_lower in SPECIAL_V2_TO_V1_MODELS:
-        return {**body, "model": SPECIAL_V2_TO_V1_MODELS[model_lower]}
 
     return body
 
@@ -241,20 +201,17 @@ async def list_models(user: User = Depends(get_current_user)):
 
     # 去重提取各上游任务
     unique_v1 = {url: config.UPSTREAM_API_KEY for url in config.UPSTREAM_ROUTES.values()}
-    unique_v2 = {v2_config.UPSTREAM_BASE: v2_config.UPSTREAM_API_KEY}
-    v3_upstream = (v3_config.UPSTREAM_BASE, v3_config.UPSTREAM_API_KEY, v3_config.MODEL_PREFIX)
+
 
     v1_tasks = [fetch_models(url, key) for url, key in unique_v1.items()]
-    v2_tasks = [fetch_models(url, key) for url, key in unique_v2.items()]
-    v3_tasks = [fetch_models(v3_upstream[0], v3_upstream[1], v3_upstream[2])]
+
 
     # 并发请求全部上游
-    all_results = await asyncio.gather(*(v1_tasks + v2_tasks + v3_tasks))
+    all_results = await asyncio.gather(*(v1_tasks))
 
     # 拆分结果用于有序合并
     v1_results = all_results[:len(v1_tasks)]
-    v2_results = all_results[len(v1_tasks):len(v1_tasks)+len(v2_tasks)]
-    v3_results = all_results[len(v1_tasks)+len(v2_tasks):]
+
 
     # 合并去重字典 (Python 3.7+ 字典保持插入顺序)
     merged: dict[str, dict] = {}
@@ -265,36 +222,5 @@ async def list_models(user: User = Depends(get_current_user)):
             if "id" in m:
                 merged[m["id"]] = m
 
-    # 提取 V2 原始列表，用于复制短名称的元数据
-    v2_models_list = []
-    for models in v2_results:
-        v2_models_list.extend(models)
-    v2_dict = {m["id"]: m for m in v2_models_list if "id" in m}
-
-    # 2. 插入短名称伪装模型 (紧跟在 V1 后面)
-    for short_name, long_name in SPECIAL_V2_TO_V1_MODELS.items():
-        if long_name in v2_dict:
-            special_m = v2_dict[long_name].copy()
-            special_m["id"] = short_name
-            merged[short_name] = special_m
-        else:
-            # Fallback 创建
-            merged[short_name] = {
-                "id": short_name,
-                "object": "model",
-                "created": 1700000000,
-                "owned_by": "apollodorus"
-            }
-
-    # 3. 插入原生 V2 模型 (包含长名称)
-    for m in v2_models_list:
-        if "id" in m:
-            merged[m["id"]] = m
-
-    # 4. 插入 V3 模型
-    for models in v3_results:
-        for m in models:
-            if "id" in m:
-                merged[m["id"]] = m
 
     return {"object": "list", "data": list(merged.values())}

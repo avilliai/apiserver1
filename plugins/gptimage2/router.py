@@ -1,5 +1,3 @@
-
-
 import httpx
 from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,23 +10,34 @@ from plugins.gptimage2 import config
 PLUGIN_PREFIX = "/v1"
 PLUGIN_NAME = "gptimage2"
 
-# 真正的后端地址，建议放到 .env 里
-        # 或从 os.environ 读取
 BACKEND_BASE = config.BACKEND_BASE
 BACKEND_KEY  = config.BACKEND_KEY
+
+# 1K 分辨率走这个更快的本地服务
+BACKEND_BASE_1K = "http://localhost:8019"
+
 router = APIRouter()
 
 _headers = {
     "Authorization": f"Bearer {BACKEND_KEY}",
 }
 
+
+def _pick_base(resolution: str | None) -> str:
+    """根据 resolution 选择后端地址。"""
+    if resolution and resolution.upper() == "1K":
+        return BACKEND_BASE_1K
+    return BACKEND_BASE
+
+
 # ── 共用转发助手 ────────────────────────────────────────────────
 
 async def _forward_json(path: str, body: dict) -> dict:
     """转发 JSON 请求到后端，返回解析后的 JSON。"""
+    base = _pick_base(body.get("resolution"))
     async with httpx.AsyncClient(timeout=None) as client:
         resp = await client.post(
-            f"{BACKEND_BASE}{path}",
+            f"{base}{path}",
             json=body,
             headers=_headers,
         )
@@ -54,9 +63,11 @@ async def _forward_multipart(path: str, request: Request) -> dict:
         else:
             data[key] = value
 
+    base = _pick_base(data.get("resolution"))
+
     async with httpx.AsyncClient(timeout=None) as client:
         resp = await client.post(
-            f"{BACKEND_BASE}{path}",
+            f"{base}{path}",
             files=files if files else None,
             data=data,
             headers=_headers,

@@ -9,9 +9,9 @@ DESCRIPTION = "基于stable diffusion的图像生成"
 
 # 每个 API Key 每天 50 次
 QUOTA_DEFAULT = 30
-RPM=1  #每分钟请求次数
+RPM=10  #每分钟请求次数
 # 统一转发到你的 SD 服务
-UPSTREAM_BASE_URL = "http://localhost:3529"
+UPSTREAM_BASE_URL = "http://35dab534.r17.cpolar.top"
 
 # 是否需要 API KEY（一般 SD WebUI 不需要，可以留空）
 UPSTREAM_API_KEY = ""
