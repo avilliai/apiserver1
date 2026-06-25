@@ -17,7 +17,7 @@ POST_TEST = {
     "headers": {"Authorization": f"Bearer apikey"},
     "type": "post",
     "end_point": "/v1/images/edits",
-    "params": {"prompt": "画出全身，三视图，给出完整的表情差分和服饰构成。包括眼睛、发型、发色等特征点要素需要单独列出来。角色参考图1，格式参考图2", "aspect_ratio": "1:1","model": "gpt-image-2"},
+    "params": {"prompt": "画出全身，三视图，给出完整的表情差分和服饰构成。包括眼睛、发型、发色等特征点要素需要单独列出来。角色参考图1，格式参考图2", "aspect_ratio": "1:1","model": "gpt-image-2","resolution": "1K"},
     "files": ["images"]
 }
 
@@ -37,7 +37,7 @@ with open("yucca.png", "rb") as f1 , open("img3.png", "rb") as f:
             ("images", ("yucca.png", f1, "image/png")),
             ("images", ("img3.png", f, "image/png"))
         ],
-        data={"prompt": "画出全身，三视图，给出完整的表情差分和服饰构成。包括眼睛、发型、发色等特征点要素需要单独列出来。角色参考图1，格式参考图2", "aspect_ratio": "1:1","model": "gpt-image-2"},
+        data={"prompt": "画出全身，三视图，给出完整的表情差分和服饰构成。包括眼睛、发型、发色等特征点要素需要单独列出来。角色参考图1，格式参考图2", "aspect_ratio": "1:1","model": "gpt-image-2","resolution": "1K"},
         timeout=None,
         headers=headers,
     )
