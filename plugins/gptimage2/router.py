@@ -14,7 +14,7 @@ BACKEND_BASE = config.BACKEND_BASE
 BACKEND_KEY  = config.BACKEND_KEY
 
 # 1K 分辨率走这个更快的本地服务
-BACKEND_BASE_1K = "http://localhost:8019"
+BACKEND_BASE_1K = "http://localhost:8019/v1"
 
 router = APIRouter()
 
