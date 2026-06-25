@@ -24,6 +24,7 @@ POST_TEST={
         "response_format": "url", # 或 "b64_json"
         "model": "gpt-image-2",
         "n": 1,
+        "resolution": "1K"
     }
 }
 
@@ -42,6 +43,7 @@ resp = httpx.post(
         "response_format": "url", # 或 "b64_json"
         "model": "gpt-image-2",
         "n": 1,
+        "resolution": "1K"
     },
     headers=headers,
     timeout=None
