@@ -4,8 +4,8 @@ plugins/gptsovits/config.py
 GPT-SoVITS 本地 TTS 配置
 """
 
-DISPLAY_NAME = "GPT-SoVITS 文本转语音"
-DESCRIPTION  = "基于 GPT-SoVITS 的本地 TTS，返回 WAV 音频"
+DISPLAY_NAME = "GPT-SoVITS"
+DESCRIPTION  = "Eridanus中配置: http://api.apollodorus.xyz/gptsovits/tts"
 
 # 每个 API Key 每天默认配额
 QUOTA_DEFAULT = 1000
