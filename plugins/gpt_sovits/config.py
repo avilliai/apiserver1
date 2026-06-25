@@ -1,5 +1,11 @@
+"""
+plugins/gptsovits/config.py
+
+GPT-SoVITS 本地 TTS 配置
+"""
+
 DISPLAY_NAME = "GPT-SoVITS 文本转语音"
-DESCRIPTION = "基于 GPT-SoVITS 的本地 TTS，直接返回 WAV 音频"
+DESCRIPTION  = "基于 GPT-SoVITS 的本地 TTS，返回 WAV 音频"
 
 # 每个 API Key 每天默认配额
 QUOTA_DEFAULT = 1000
@@ -14,10 +20,10 @@ PROMPT_LANG    = "zh"
 
 POST_TEST = {
     "headers": {"Authorization": "Bearer apikey"},
-    "type": "get",
+    "type": "post",
     "end_point": "/gptsovits/tts",
     "params": {
-        "text": "你好，世界！",
+        "text":      "你好，世界！",
         "text_lang": "zh",
     },
 }
@@ -28,11 +34,11 @@ import requests
 BASE    = "http://api.apollodorus.xyz"
 API_KEY = "sk-xxxx"
 
-r = requests.get(
+r = requests.post(
     BASE + "/gptsovits/tts",
-    params={
+    json={
         "text":      "拉海洛来了个救世主",
-        "text_lang": "zh",          # zh / en / ja
+        "text_lang": "zh",   # zh / en / ja / auto
     },
     headers={"Authorization": f"Bearer {API_KEY}"},
     timeout=120,
