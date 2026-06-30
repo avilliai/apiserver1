@@ -23,7 +23,14 @@ function toast(msg, type = 'success') {
 
 function fmt(ts) {
   if (!ts) return '—';
-  return new Date(ts).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  let s = ts;
+  // 后端存的是 UTC（naive，无时区标记）。若字符串不带时区则按 UTC 解析，
+  // 再由 toLocaleString 换算到浏览器本地时区（东八区即 +8 小时）。
+  if (typeof s === 'string') {
+    s = s.replace(' ', 'T');
+    if (!/[zZ]|[+-]\d\d:?\d\d$/.test(s)) s += 'Z';
+  }
+  return new Date(s).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
 }
 function statusTag(code) {
   return `<span class="tag ${code>=200&&code<300?'tag-green':'tag-red'}">${code}</span>`;
