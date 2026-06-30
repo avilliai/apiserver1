@@ -18,6 +18,37 @@ REF_AUDIO_PATH = "output/slicer_opt/output.wav_0009342720_0009558400.wav"
 PROMPT_TEXT    = "怎么啊？如果有你在也不放心，那就干脆给我也装个限制器或者炸弹喽。"
 PROMPT_LANG    = "zh"
 
+# /tts 接口的默认推理参数。
+# 客户端请求体中若携带同名字段，会覆盖这里的默认值；不携带则使用默认值补全。
+# 字段含义详见 GPT-SoVITS api_v2.py 文档。
+TTS_DEFAULTS = {
+    "ref_audio_path":      REF_AUDIO_PATH,
+    "aux_ref_audio_paths": [],
+    "prompt_text":         PROMPT_TEXT,
+    "prompt_lang":         PROMPT_LANG,
+    "top_k":               15,
+    "top_p":               1,
+    "temperature":         1,
+    "text_split_method":   "cut5",
+    "batch_size":          1,
+    "batch_threshold":     0.75,
+    "split_bucket":        True,
+    "speed_factor":        1.0,
+    "fragment_interval":   0.3,
+    "seed":                -1,
+    "media_type":          "wav",
+    "streaming_mode":      False,
+    "parallel_infer":      False,
+    "repetition_penalty":  1.35,
+    "sample_steps":        32,
+    "super_sampling":      False,
+    "overlap_length":      2,
+    "min_chunk_length":    16,
+}
+
+# 客户端被允许覆盖的字段白名单（text / text_lang 单独处理，不在此列表中）
+TTS_OVERRIDABLE_FIELDS = set(TTS_DEFAULTS.keys())
+
 POST_TEST = {
     "headers": {"Authorization": "Bearer apikey"},
     "type": "post",
