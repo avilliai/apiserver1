@@ -8,7 +8,7 @@ DISPLAY_NAME = "GPT-SoVITS"
 DESCRIPTION  = "Eridanus tts_v2中配置 base_url: http://api.apollodorus.xyz apikey: 你自己申请的apikey"
 
 # 每个 API Key 每天默认配额
-QUOTA_DEFAULT = 3000
+QUOTA_DEFAULT = 1000
 
 # GPT-SoVITS 服务地址
 BACKEND_BASE = "http://127.0.0.1:3529"
