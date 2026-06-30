@@ -351,6 +351,12 @@ async function loadAdminLogs(resetPage = true) {
     const from = d.total ? _logsOffset + 1 : 0;
     const to = Math.min(_logsOffset + _logsLimit, d.total);
     document.getElementById('logs-page-info').textContent = `${from}–${to} of ${d.total}`;
+    const totalPages = Math.max(1, Math.ceil(d.total / _logsLimit));
+    const curPage = Math.floor(_logsOffset / _logsLimit) + 1;
+    document.getElementById('logs-page-total').textContent = `/ ${totalPages} 页`;
+    const jump = document.getElementById('logs-page-jump');
+    jump.max = totalPages;
+    if (document.activeElement !== jump) jump.value = curPage;
     document.getElementById('logs-result-badge').textContent = `${d.total} 条记录${_logsOffset===0 ? ' · 每 8 秒自动刷新' : ''}`;
     document.getElementById('logs-prev').disabled = _logsOffset <= 0;
     document.getElementById('logs-next').disabled = to >= d.total;
@@ -376,6 +382,18 @@ function logsPage(dir) {
   const next = _logsOffset + dir * _logsLimit;
   if (next < 0 || next >= _logsTotal) return;
   _logsOffset = next;
+  loadAdminLogs(false);
+}
+
+/** 手动跳转到指定页（输入框 + Go），越界自动夹紧到 [1, 总页数] */
+function logsJump() {
+  const inp = document.getElementById('logs-page-jump');
+  const totalPages = Math.max(1, Math.ceil(_logsTotal / _logsLimit));
+  let p = parseInt(inp.value, 10);
+  if (!Number.isFinite(p)) { inp.value = Math.floor(_logsOffset / _logsLimit) + 1; return; }
+  p = Math.min(Math.max(1, p), totalPages);
+  inp.value = p;
+  _logsOffset = (p - 1) * _logsLimit;
   loadAdminLogs(false);
 }
 

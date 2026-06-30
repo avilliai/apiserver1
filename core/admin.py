@@ -1,6 +1,7 @@
 """
 core/admin.py — Admin-only endpoints: invite codes, user listing, global stats
 """
+import re
 import secrets
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
@@ -190,23 +191,33 @@ async def list_access_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    检索中间件记录的请求日志。关键字 search 在用户名/IP/接口/插件/请求体/响应体
-    上做大小写不敏感模糊匹配。返回的中文为可读文本（FastAPI 默认 ensure_ascii=False）。
+    检索中间件记录的请求日志。关键字 search 支持三种模式：
+    · "user: 用户名" → 精确(大小写不敏感)匹配该用户名的全部请求记录；
+    · "ip: 地址"     → 精确匹配该 IP 的全部请求记录；
+    · 其它           → 在用户名/IP/接口/插件/请求体/响应体上做大小写不敏感模糊匹配。
+    返回的中文为可读文本（FastAPI 默认 ensure_ascii=False）。
     """
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
 
     base = select(AccessLog)
     if search:
-        kw = f"%{search}%"
-        base = base.where(or_(
-            AccessLog.username.ilike(kw),
-            AccessLog.ip_address.ilike(kw),
-            AccessLog.endpoint.ilike(kw),
-            AccessLog.plugin.ilike(kw),
-            AccessLog.request_body.ilike(kw),
-            AccessLog.response_body.ilike(kw),
-        ))
+        # 前缀语法 "user: xxx" / "ip: xxx" 切换为对应字段的精确过滤；其余照旧模糊匹配。
+        m = re.match(r"\s*(user|ip)\s*:\s*(.+?)\s*$", search, re.IGNORECASE)
+        if m and m.group(1).lower() == "user":
+            base = base.where(AccessLog.username.ilike(m.group(2)))
+        elif m:
+            base = base.where(AccessLog.ip_address.ilike(m.group(2)))
+        else:
+            kw = f"%{search}%"
+            base = base.where(or_(
+                AccessLog.username.ilike(kw),
+                AccessLog.ip_address.ilike(kw),
+                AccessLog.endpoint.ilike(kw),
+                AccessLog.plugin.ilike(kw),
+                AccessLog.request_body.ilike(kw),
+                AccessLog.response_body.ilike(kw),
+            ))
     if plugin:
         base = base.where(AccessLog.plugin == plugin)
     if user_id is not None:

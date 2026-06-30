@@ -257,7 +257,7 @@
       <div class="card mb-24">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap;flex-shrink:0">Search</span>
-          <input class="form-input" id="logs-search" placeholder="关键字：用户名 / IP / 接口 / 插件 / 请求或返回内容…"
+          <input class="form-input" id="logs-search" placeholder="关键字搜索请求内容；或用 user: 用户名 / ip: 地址 精确筛选…"
             style="flex:1;min-width:220px;padding:7px 11px;font-size:13px"
             onkeydown="if(event.key==='Enter')loadAdminLogs()" />
           <select class="form-input" id="logs-plugin" style="width:160px;padding:7px 11px;font-size:12px">
@@ -278,9 +278,17 @@
           </thead>
           <tbody></tbody>
         </table>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" id="logs-prev" onclick="logsPage(-1)">← Prev</button>
-          <span id="logs-page-info" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="logs-page-info" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">跳至</span>
+            <input class="form-input" id="logs-page-jump" type="number" min="1"
+              style="width:60px;padding:5px 8px;font-size:12px;text-align:center"
+              onkeydown="if(event.key==='Enter')logsJump()" />
+            <span id="logs-page-total" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
+            <button class="btn btn-ghost btn-sm" onclick="logsJump()">Go</button>
+          </div>
           <button class="btn btn-ghost btn-sm" id="logs-next" onclick="logsPage(1)">Next →</button>
         </div>
       </div>
