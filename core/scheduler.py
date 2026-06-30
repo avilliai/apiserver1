@@ -3,14 +3,28 @@ core/scheduler.py
 """
 import copy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
-from sqlalchemy import select
+from datetime import datetime, timedelta
+from sqlalchemy import select, delete
 
 from core.ban import cleanup_request_log
 from core.quota import cleanup_rpm_records
-from core.database import AsyncSessionLocal, User, get_user_quota_lock
+from core.database import AsyncSessionLocal, User, AccessLog, get_user_quota_lock
 
 scheduler = AsyncIOScheduler()
+
+ACCESS_LOG_RETENTION_DAYS = 30
+
+
+async def purge_old_access_logs():
+    """删除超过保留期的审计日志，控制 gateway.db 体积。"""
+    cutoff = datetime.utcnow() - timedelta(days=ACCESS_LOG_RETENTION_DAYS)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            delete(AccessLog).where(AccessLog.created_at < cutoff)
+        )
+        await db.commit()
+    print(f"🧹[CRON] Purged {result.rowcount} access_logs older than "
+          f"{ACCESS_LOG_RETENTION_DAYS}d at {datetime.now()}")
 
 async def reset_all_quotas():
     """
@@ -68,5 +82,8 @@ def start_scheduler():
 
     # 每 10 分钟清理 RPM 内存字典，防止空置数据堆积
     scheduler.add_job(cleanup_rpm_records, trigger="interval", minutes=10, timezone=tz)
+
+    # 每天 03:17 清理超过保留期的审计日志
+    scheduler.add_job(purge_old_access_logs, trigger="cron", hour=3, minute=17, timezone=tz)
 
     scheduler.start()

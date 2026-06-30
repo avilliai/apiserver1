@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import importlib, pkgutil, os, sys
 
 from core.ban import AutoBanMiddleware
+from core.access_log import AccessLogMiddleware, load_banned_ips
 from core.logger import setup_logging
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -26,6 +27,12 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 非破坏性建表：create_all 默认 checkfirst=True，只创建缺失的表
+    # （access_logs），已存在的表一律跳过、不做任何修改。
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    # 从 banned_ips 表载入被封 IP 到内存集，供中间件拦截
+    await load_banned_ips()
     start_scheduler()
     yield
 
@@ -40,6 +47,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(AutoBanMiddleware)
+# 最后添加 = 最外层，最先执行：确保被封 IP 在进入业务前被拦截，
+# 同时能捕获最终响应字节用于审计日志。
+app.add_middleware(AccessLogMiddleware)
 
 # Core routers
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
