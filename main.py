@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import importlib, pkgutil, os, sys
 
 from core.ban import AutoBanMiddleware
-from core.access_log import AccessLogMiddleware, load_banned_ips
+from core.access_log import AccessLogMiddleware, load_banned_ips, build_route_map
 from core.logger import setup_logging
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -101,6 +101,9 @@ def load_plugins():
             print(f"[Plugin] Failed to load {name}: {e}")
 
 load_plugins()
+
+# 路由全部注册完成后，构建「路由→插件」映射，供审计日志精确判定插件归属
+build_route_map(app)
 
 
 @app.get("/api/health")

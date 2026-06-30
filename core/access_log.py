@@ -54,7 +54,18 @@ def _should_skip(path: str) -> bool:
 
 
 def _plugin_from_path(path: str) -> str:
-    """由路径推导插件标签，仅用于展示/筛选。"""
+    """
+    判定请求归属的插件。优先用「实际命中的路由」（启动时由 build_route_map
+    收集的 路径正则→插件名 映射，来源 include_router(tags=[name])），
+    从而正确区分同样挂在 /v1 下的不同插件（如 gptimage2 vs openai_proxy）；
+    无匹配时回退到路径启发式。
+    """
+    for regex, name in _route_plugins:
+        try:
+            if regex.match(path):
+                return name
+        except Exception:
+            continue
     if path.startswith("/api/v1/"):
         parts = path.split("/")
         if len(parts) >= 4 and parts[3]:
@@ -63,6 +74,21 @@ def _plugin_from_path(path: str) -> str:
         return "openai_proxy"
     parts = [p for p in path.split("/") if p]
     return parts[0] if parts else "unknown"
+
+
+# ── 路由 → 插件 映射（启动后由 main.build_route_map 填充）──────────────────────
+_route_plugins: list = []
+
+
+def build_route_map(app) -> None:
+    """在所有路由注册完成后调用：收集 (编译后的路径正则, 插件名/tag)。"""
+    _route_plugins.clear()
+    for route in getattr(app, "routes", []):
+        regex = getattr(route, "path_regex", None)
+        tags = getattr(route, "tags", None)
+        if regex is not None and tags:
+            _route_plugins.append((regex, str(tags[0])))
+    logger.info(f"🧭 Route→plugin map built: {len(_route_plugins)} routes")
 
 
 # ── 内存封禁集（来源：banned_ips 表）────────────────────────────────────────
