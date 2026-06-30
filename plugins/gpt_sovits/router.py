@@ -23,7 +23,7 @@ from plugins.gpt_sovits import config
 logger = logging.getLogger(__name__)
 
 PLUGIN_PREFIX = "/gptsovits"
-PLUGIN_NAME   = "gptsovits"
+PLUGIN_NAME   = "gpt_sovits"
 
 router = APIRouter()
 
