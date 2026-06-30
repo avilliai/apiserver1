@@ -142,32 +142,35 @@ async def global_stats(
     db: AsyncSession = Depends(get_db),
 ):
     total_users = (await db.execute(select(func.count(User.id)))).scalar()
-    total_requests = (await db.execute(select(func.count(RequestLog.id)))).scalar()
+    # 统计改用 access_logs（中间件全量记录，含流式），比 request_logs 更准确。
+    # 代价：仅有中间件上线以来的数据，更早历史不计入。
+    total_requests = (await db.execute(select(func.count(AccessLog.id)))).scalar()
 
-    # Requests per plugins
+    # Requests per plugin（按量降序）
     plugin_rows = (await db.execute(
-        select(RequestLog.plugin, func.count(RequestLog.id))
-        .group_by(RequestLog.plugin)
+        select(AccessLog.plugin, func.count(AccessLog.id))
+        .group_by(AccessLog.plugin)
+        .order_by(func.count(AccessLog.id).desc())
     )).all()
 
-    # Requests per user
+    # Requests per (registered) user
     user_rows = (await db.execute(
-        select(User.username, func.count(RequestLog.id))
-        .join(RequestLog, User.id == RequestLog.user_id, isouter=True)
+        select(User.username, func.count(AccessLog.id))
+        .join(AccessLog, User.id == AccessLog.user_id, isouter=True)
         .group_by(User.username)
     )).all()
 
     # Last 30 daily totals
     from sqlalchemy import text
     daily_rows = (await db.execute(text(
-        "SELECT date(created_at) as day, count(*) as cnt FROM request_logs "
+        "SELECT date(created_at) as day, count(*) as cnt FROM access_logs "
         "GROUP BY day ORDER BY day DESC LIMIT 30"
     ))).all()
 
     return {
         "total_users": total_users,
         "total_requests": total_requests,
-        "by_plugin": [{"plugins": r[0], "count": r[1]} for r in plugin_rows],
+        "by_plugin": [{"plugin": r[0] or "unknown", "count": r[1]} for r in plugin_rows],
         "by_user": [{"username": r[0], "count": r[1]} for r in user_rows],
         "daily": [{"day": r[0], "count": r[1]} for r in reversed(daily_rows)],
     }

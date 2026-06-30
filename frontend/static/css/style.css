@@ -557,7 +557,7 @@
       color: var(--text2); font-size: 12.5px; cursor:pointer; transition: all 0.2s; font-family: inherit; user-select:none;
     }
     .subnav .pill:hover { border-color: var(--rose); background: rgba(147,178,216,0.18); }
-    .subnav .pill.active { background: var(--grad-pink); border-color: transparent; color: #fff; }
+    .subnav .pill.active { background: linear-gradient(135deg, #6E8CB8, #5C7FAE); border-color: #5C7FAE; color: #fff; box-shadow: 0 3px 10px rgba(92,127,174,0.30); }
 
     /* glassify existing components */
     .card { background: var(--glass-white); backdrop-filter: blur(22px) saturate(1.4); border: 1px solid var(--glass-border); border-radius: var(--r2); box-shadow: 0 8px 28px var(--shadow-soft); }

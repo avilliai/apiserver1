@@ -310,17 +310,17 @@ function drawLineChart(daily) {
     .map(([x,,day])=>`<text x="${x}" y="${H+14}" fill="#9ab0b2" font-size="9" text-anchor="middle" font-family="JetBrains Mono">${(day||'').slice(5)}</text>`)
     .join('');
   const dots = pts.map(([x,y,day,count])=>
-    `<circle cx="${x}" cy="${y}" r="3" fill="#58a0a4" opacity="0.8"><title>${day}: ${count}</title></circle>`
+    `<circle cx="${x}" cy="${y}" r="3" fill="#5C7FAE" opacity="0.8"><title>${day}: ${count}</title></circle>`
   ).join('');
   svg.innerHTML = `
     <defs>
       <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#9ad4d6" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#9ad4d6" stop-opacity="0.02"/>
+        <stop offset="0%" stop-color="#93B2D8" stop-opacity="0.35"/>
+        <stop offset="100%" stop-color="#93B2D8" stop-opacity="0.02"/>
       </linearGradient>
     </defs>
     <path d="${area}" fill="url(#ag)"/>
-    <path d="${line}" fill="none" stroke="#58a0a4" stroke-width="2" stroke-opacity="0.9"/>
+    <path d="${line}" fill="none" stroke="#5C7FAE" stroke-width="2" stroke-opacity="0.9"/>
     ${dots}${labels}`;
 }
 
@@ -351,10 +351,25 @@ async function loadAdminLogs(resetPage = true) {
     const from = d.total ? _logsOffset + 1 : 0;
     const to = Math.min(_logsOffset + _logsLimit, d.total);
     document.getElementById('logs-page-info').textContent = `${from}–${to} of ${d.total}`;
-    document.getElementById('logs-result-badge').textContent = `${d.total} 条记录`;
+    document.getElementById('logs-result-badge').textContent = `${d.total} 条记录${_logsOffset===0 ? ' · 每 8 秒自动刷新' : ''}`;
     document.getElementById('logs-prev').disabled = _logsOffset <= 0;
     document.getElementById('logs-next').disabled = to >= d.total;
   } catch(e) { toast(e.message, 'error'); }
+  _ensureLogsAutoRefresh();
+}
+
+/* 请求日志自动刷新：在该页且处于最新一页时，每 8 秒静默拉取最新（翻页/搜索输入/看详情时不打扰） */
+let _logsAutoTimer = null;
+function _ensureLogsAutoRefresh() {
+  if (_logsAutoTimer) return;
+  _logsAutoTimer = setInterval(() => {
+    const pg = document.getElementById('page-admin-logs');
+    if (!pg || !pg.classList.contains('active')) return;
+    if (_logsOffset !== 0) return;
+    if (document.activeElement === document.getElementById('logs-search')) return;
+    if (document.querySelector('.modal-overlay')) return;
+    loadAdminLogs(false);
+  }, 8000);
 }
 
 function logsPage(dir) {
