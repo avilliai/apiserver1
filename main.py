@@ -25,12 +25,40 @@ from core.scheduler import start_scheduler
 
 setup_logging()
 
+
+def _ensure_schema(sync_conn):
+    """
+    幂等的轻量迁移：create_all 只会创建"缺失的表"，但不会给"已存在的表"补列。
+    异地部署 / 老库的 users 表可能没有封禁相关列，这里用 ALTER TABLE 补齐，
+    避免 ORM SELECT users.is_banned 时报 no such column。全部非破坏性（仅新增列）。
+    """
+    # users 表补封禁列
+    try:
+        cols = {row[1] for row in sync_conn.exec_driver_sql("PRAGMA table_info(users)").fetchall()}
+    except Exception:
+        cols = set()
+    if cols:  # users 表存在才补列（不存在时 create_all 已建好带列的新表）
+        for name, ddl in [
+            ("is_banned",  "ALTER TABLE users ADD COLUMN is_banned BOOLEAN NOT NULL DEFAULT 0"),
+            ("banned_at",  "ALTER TABLE users ADD COLUMN banned_at DATETIME"),
+            ("ban_reason", "ALTER TABLE users ADD COLUMN ban_reason TEXT"),
+        ]:
+            if name not in cols:
+                try:
+                    sync_conn.exec_driver_sql(ddl)
+                    print(f"[Migrate] users.{name} 列已补齐")
+                except Exception as e:
+                    print(f"[Migrate] 补列 users.{name} 失败: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 非破坏性建表：create_all 默认 checkfirst=True，只创建缺失的表
-    # （access_logs），已存在的表一律跳过、不做任何修改。
+    # （access_logs / banned_ips），已存在的表一律跳过、不做任何修改。
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # 给已存在的 users 表补齐封禁列（异地部署/老库自动迁移）
+        await conn.run_sync(_ensure_schema)
     # 从 banned_ips 表载入被封 IP 到内存集，供中间件拦截
     await load_banned_ips()
     start_scheduler()

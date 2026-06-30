@@ -40,7 +40,7 @@ function renderHomeHub() {
       <p>${escHtml(p.description||'')}</p>
       <div class="hub-foot">
         <span class="hub-go">查看详情 →</span>
-        ${p.quota_default!=null ? `<span class="hub-quota">配额 ${p.quota_default}/key</span>` : ''}
+        ${p.quota_default!=null ? `<span class="hub-quota">配额 ${p.quota_default}RPD/key</span>` : ''}
       </div>
     </div>`).join('');
 }
