@@ -13,6 +13,7 @@ Supports both streaming and non-streaming responses.
 - 特殊 V2 -> V1 模型映射：提供短名称供调用并扣除 v1 配额，长名称保留 v2 属性。
 """
 import asyncio
+import json
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 PLUGIN_PREFIX = ""
 PLUGIN_NAME = "openai_proxy"
 
+# 流式响应中，即使 HTTP 状态码是 200，也可能在首个 SSE 事件里内嵌错误。
+# 这个值控制针对这种"伪 200"错误的最大重试次数。
+MAX_STREAM_ERROR_RETRIES = 3
 
 
 # ==========================================================
@@ -65,9 +69,41 @@ def _prepare_body(body: dict, effective_plugin: str) -> dict:
     """
     model = body.get("model", "")
 
-
-
     return body
+
+
+def _extract_sse_payload(line: str) -> str:
+    """
+    从一行 SSE 文本中提取 data 部分（去掉 "data:" 前缀），
+    如果不是 data 行则原样返回去除首尾空白后的内容。
+    """
+    stripped = line.strip()
+    if stripped.startswith("data:"):
+        return stripped[len("data:"):].strip()
+    return stripped
+
+
+def _is_stream_error_payload(payload: str) -> bool:
+    """
+    判断某个 SSE data payload 是否代表上游返回的"伪 200"错误
+    （即 HTTP 状态码为 200，但事件体里包含 "error" 字段）。
+    """
+    if not payload or payload == "[DONE]":
+        return False
+    try:
+        parsed = json.loads(payload)
+    except Exception:
+        return False
+    return _is_error_body(parsed)
+
+
+def _is_error_body(parsed) -> bool:
+    """
+    判断一个已解析的 JSON 响应体是否代表错误
+    （无论 HTTP 状态码是多少，只要 body 里带 "error" 字段就算）。
+    用于非流式响应中"状态码 200 但内容是错误"的情况。
+    """
+    return isinstance(parsed, dict) and "error" in parsed
 
 
 async def _proxy_request(
@@ -103,16 +139,42 @@ async def _proxy_request(
     )
 
     if is_stream:
-        async def generate():
+        async def generate(stream_retries=0):
             async with httpx.AsyncClient(timeout=None) as client:
                 try:
                     async with client.stream(
                         "POST", upstream_url, json=upstream_body, headers=headers
                     ) as resp:
                         logger.info(f"[UPSTREAM HEADERS] {resp.headers}")
+
+                        first_line_checked = False
+
                         async for line in resp.aiter_lines():
                             if not line:
                                 continue
+
+                            if not first_line_checked:
+                                first_line_checked = True
+                                payload = _extract_sse_payload(line)
+
+                                if _is_stream_error_payload(payload):
+                                    logger.error(
+                                        f"[STREAM UPSTREAM ERROR] {payload} "
+                                        f"(stream_retries={stream_retries})"
+                                    )
+                                    if stream_retries < MAX_STREAM_ERROR_RETRIES:
+                                        async for retry_line in generate(stream_retries + 1):
+                                            yield retry_line
+                                        return
+                                    else:
+                                        # 重试次数用尽，原样把错误转发给客户端
+                                        yield f"{line.strip()}\n\n"
+                                        return
+
+                                # 首行正常，照常转发并继续处理后续行
+                                yield f"{line.strip()}\n\n"
+                                continue
+
                             yield f"{line.strip()}\n\n"
                 except Exception as e:
                     logger.error(f"[STREAM ERROR] {e}")
@@ -142,7 +204,7 @@ async def _proxy_request(
                 raise HTTPException(status_code=resp.status_code, detail=resp_json)
             else:
                 logger.error(f"[UPSTREAM ERROR] {resp.status_code} | RETRYING.......")
-                return await _proxy_request(path, body, user, db,retries+1)
+                return await _proxy_request(path, body, user, db, retries + 1)
 
         return resp_json
 
@@ -207,16 +269,13 @@ async def list_models(user: User = Depends(get_current_user)):
     # 去重提取各上游任务
     unique_v1 = {url: config.UPSTREAM_API_KEY for url in config.UPSTREAM_ROUTES.values()}
 
-
     v1_tasks = [fetch_models(url, key) for url, key in unique_v1.items()]
-
 
     # 并发请求全部上游
     all_results = await asyncio.gather(*(v1_tasks))
 
     # 拆分结果用于有序合并
     v1_results = all_results[:len(v1_tasks)]
-
 
     # 合并去重字典 (Python 3.7+ 字典保持插入顺序)
     merged: dict[str, dict] = {}
@@ -226,6 +285,5 @@ async def list_models(user: User = Depends(get_current_user)):
         for m in models:
             if "id" in m:
                 merged[m["id"]] = m
-
 
     return {"object": "list", "data": list(merged.values())}
