@@ -20,7 +20,7 @@ UPSTREAM_ROUTES = {
 }
 
 # Your master API key injected into every upstream request
-UPSTREAM_API_KEY = ""
+UPSTREAM_API_KEY = "endlesswork"
 
 # DB_EXTRA_FIELDS: informational, tracked in RequestLog.extra_json
 DB_EXTRA_FIELDS = ["model", "prompt_tokens", "completion_tokens"]
@@ -30,7 +30,7 @@ POST_TEST = {
     "type": "post",
     "end_point": "/v0/chat/completions",
     "params": {
-    "model": "gpt-5.1",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
     "messages": [
         {"role": "user", "content": "你好，简单介绍一下你自己"}
     ]

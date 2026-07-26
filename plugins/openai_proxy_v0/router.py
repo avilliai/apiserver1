@@ -88,7 +88,7 @@ async def _proxy_request(
         raise HTTPException(status_code=400, detail="'model' field is required")
 
     upstream_base, api_key, effective_plugin = _resolve(model)
-    upstream_url = f"{upstream_base}{path}"
+    upstream_url = f"{upstream_base}{path}".replace("v0","v1")
     is_stream = body.get("stream", False)
 
     # 动态构建转发的请求体 (替换名字等预处理)

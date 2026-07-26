@@ -75,6 +75,7 @@ async def _proxy_request(
     body: dict,
     user: User,
     db: AsyncSession,
+    retries=0
 ):
     model = body.get("model", "")
     if not model:
@@ -137,7 +138,11 @@ async def _proxy_request(
         })
 
         if resp.status_code >= 400:
-            raise HTTPException(status_code=resp.status_code, detail=resp_json)
+            if retries > 3:
+                raise HTTPException(status_code=resp.status_code, detail=resp_json)
+            else:
+                logger.error(f"[UPSTREAM ERROR] {resp.status_code} | RETRYING.......")
+                return await _proxy_request(path, body, user, db,retries+1)
 
         return resp_json
 
