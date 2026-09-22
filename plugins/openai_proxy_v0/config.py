@@ -8,7 +8,7 @@ Plugin configuration. This file is the ONLY place you need to edit for this plug
 """
 
 DISPLAY_NAME = "OpenAI Proxy v0"
-DESCRIPTION = ("可用模型deepseek-v4-flash")
+DESCRIPTION = ("可用模型'deepseek/deepseek-v4-flash', 'google/gemini-2.5-flash-lite', 'openai/gpt-5.6-luna', 'openai/gpt-5-nano', 'zai/glm-5.3-flash', 'mistral/mistral-small-4', 'gpt-5.6-luna', 'gpt-5-nano', 'deepseek-v4-flash', 'gemini-2.5-flash-lite', 'glm-5.3-flash', 'mistral-small-4'")
 
 # Set to None for unlimited, or an integer to cap per-user calls
 QUOTA_DEFAULT = 1200
