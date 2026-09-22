@@ -380,10 +380,10 @@ async def unban_user(
         "restored_limits": {p: quota[p]["limit"] for p in quota},
     }
 
-# ---------- ??????? ----------
+# ---------- 日志清理 ----------
 
 class LogPurgeRequest(BaseModel):
-    days: int = 7
+    days: int = 3
 
 
 @router.post("/logs/purge")
@@ -392,7 +392,7 @@ async def manual_purge_logs(
     admin: User = Depends(get_current_admin),
 ):
     """
-    ???????????????????????????
+    手动触发清理指定天数之前的日志（默认保留最近 3 天）。
     """
     from core.scheduler import purge_old_logs
     if req.days < 0:

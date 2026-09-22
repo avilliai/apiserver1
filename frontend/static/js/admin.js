@@ -488,20 +488,21 @@ async function unbanFromLog(id) {
 
 
 async function purgeLogsPrompt() {
-  const daysStr = prompt("???????????????????????????????????", "7");
+  const daysStr = prompt('请输入要保留的天数（早于该天数的日志将被永久删除）：', '3');
   if (daysStr === null) return;
   const days = parseInt(daysStr, 10);
   if (isNaN(days) || days < 0) {
-    alert("?????????????");
+    alert('请输入有效的非负整数天数');
     return;
   }
-  if (!confirm(`???? ${days} ???????????????????`)) return;
+  const msg = '确认清理 ' + days + ' 天前的所有日志？此操作不可逆。';
+  if (!confirm(msg)) return;
   try {
     const res = await apiFetch('/api/admin/logs/purge', {
       method: 'POST',
       body: JSON.stringify({ days: days })
     });
-    toast(`??????????? ${res.purged_access_logs} ?????? ${res.purged_request_logs} ?`);
+    toast('清理完成：删除 ' + res.purged_access_logs + ' 条访问日志、' + res.purged_request_logs + ' 条请求日志');
     loadAdminLogs(true);
   } catch(e) {
     toast(e.message, 'error');

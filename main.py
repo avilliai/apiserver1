@@ -21,7 +21,7 @@ from core.user import router as user_router
 
 
 from contextlib import asynccontextmanager
-from core.scheduler import start_scheduler
+from core.scheduler import start_scheduler, purge_old_logs
 
 setup_logging()
 
@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(_ensure_schema)
     # 从 banned_ips 表载入被封 IP 到内存集，供中间件拦截
     await load_banned_ips()
+    # 启动时先触发一次日志清理，仅保留最近日志并回收空间（适合已有历史存量数据的项目）
+    try:
+        await purge_old_logs()
+    except Exception as e:
+        print(f"[Startup] 日志清理失败: {e}")
     start_scheduler()
     yield
 
