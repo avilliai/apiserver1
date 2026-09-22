@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
-from plugins.openai_proxy import config
+from plugins.openai_proxy_v0 import config
 
 import logging
 
