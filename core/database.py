@@ -6,13 +6,27 @@ import asyncio
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, event
 from sqlalchemy.orm import relationship
 
 DATABASE_URL = "sqlite+aiosqlite:///./gateway.db"
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# ? SQLite ?????? WAL ???????????????? auto_vacuum
+@event.listens_for(engine.sync_engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode = WAL")
+    cursor.execute("PRAGMA busy_timeout = 5000")
+    cursor.execute("PRAGMA synchronous = NORMAL")
+    cursor.execute("PRAGMA auto_vacuum")
+    row = cursor.fetchone()
+    if row and row[0] == 0:
+        cursor.execute("PRAGMA auto_vacuum = INCREMENTAL")
+    cursor.close()
+
 
 class Base(DeclarativeBase):
     pass
@@ -86,7 +100,7 @@ class RequestLog(Base):
     plugin = Column(String(64), index=True)
     endpoint = Column(String(256))
     status_code = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     extra_json = Column(Text, default="{}")  # plugin-specific metadata
 
     user = relationship("User", back_populates="logs")

@@ -54,9 +54,9 @@ def _resolve(model: str) -> tuple[str, str, str]:
       5. fallback      → v1 最后一个上游
     """
     model_lower = model.lower()
-    if model_lower not in ['openrouter:openai/gpt-5.4-nano','openrouter:openai/gpt-4o-mini','openrouter:deepseek/deepseek-v4-pro', 'openrouter:deepseek/deepseek-v4-flash', 'openrouter:deepseek/deepseek-v3.2']:
-        logger.info(f"不允许的模型名{model_lower}，已替换为 openrouter:deepseek/deepseek-v4-flash")
-        model_lower="openrouter:deepseek/deepseek-v4-flash"
+    if model_lower not in ['kimi-k3']:
+        logger.info(f"不允许的模型名{model_lower}，已替换为 kimi-k3")
+        model_lower="kimi-k3"
     # ── 4. v1：前缀路由 ────────────────────────────────────────────────────────
     for prefix, url in config.UPSTREAM_ROUTES.items():
         if model_lower.startswith(prefix):

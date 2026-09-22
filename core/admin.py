@@ -379,3 +379,24 @@ async def unban_user(
         "unbanned_ips": removed,
         "restored_limits": {p: quota[p]["limit"] for p in quota},
     }
+
+# ---------- ??????? ----------
+
+class LogPurgeRequest(BaseModel):
+    days: int = 7
+
+
+@router.post("/logs/purge")
+async def manual_purge_logs(
+    req: LogPurgeRequest,
+    admin: User = Depends(get_current_admin),
+):
+    """
+    ???????????????????????????
+    """
+    from core.scheduler import purge_old_logs
+    if req.days < 0:
+        raise HTTPException(status_code=400, detail="Days must be >= 0")
+    res = await purge_old_logs(retention_days=req.days)
+    return {"message": "Logs purged successfully", **res}
+

@@ -8,7 +8,7 @@ Plugin configuration. This file is the ONLY place you need to edit for this plug
 """
 
 DISPLAY_NAME = "OpenAI Proxy"
-DESCRIPTION = ("注意，此接口是http://api.apollodorus.xyz/v0  可用模型'openrouter:openai/gpt-5.4-nano',''openrouter:openai/gpt-4o-mini','openrouter:deepseek/deepseek-v4-pro', 'openrouter:deepseek/deepseek-v4-flash', 'openrouter:deepseek/deepseek-v3.2'")
+DESCRIPTION = ("注意，此接口是http://api.apollodorus.xyz/v0  可用模型kimi-k3")
 
 # Set to None for unlimited, or an integer to cap per-user calls
 QUOTA_DEFAULT = 1200
@@ -16,7 +16,7 @@ QUOTA_DEFAULT = 1200
 # Upstream routing table: model-prefix -> upstream base URL
 # Add new model families here without touching any other file
 UPSTREAM_ROUTES = {
-    "openrouter": "http://localhost:8018",
+    "kimi-k3": "http://localhost:8077",
 }
 
 # Your master API key injected into every upstream request
@@ -30,7 +30,7 @@ POST_TEST = {
     "type": "post",
     "end_point": "/v0/chat/completions",
     "params": {
-    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "model": "kimi-k3",
     "messages": [
         {"role": "user", "content": "你好，简单介绍一下你自己"}
     ]
