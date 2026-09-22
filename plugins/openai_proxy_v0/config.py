@@ -7,8 +7,8 @@ Plugin configuration. This file is the ONLY place you need to edit for this plug
 - DB_EXTRA_FIELDS: optional metadata (informational, not auto-migrated)
 """
 
-DISPLAY_NAME = "OpenAI Proxy"
-DESCRIPTION = ("注意，此接口是http://api.apollodorus.xyz/v0  可用模型kimi-k3")
+DISPLAY_NAME = "OpenAI Proxy v0"
+DESCRIPTION = ("可用模型deepseek-v4-flash")
 
 # Set to None for unlimited, or an integer to cap per-user calls
 QUOTA_DEFAULT = 1200
@@ -16,11 +16,16 @@ QUOTA_DEFAULT = 1200
 # Upstream routing table: model-prefix -> upstream base URL
 # Add new model families here without touching any other file
 UPSTREAM_ROUTES = {
-    "kimi-k3": "http://localhost:8077",
+    "deepseek":     "http://localhost:8077",
+    "gpt":      "http://localhost:8077",
+    "gemini":   "http://localhost:8077",
+    "glm": "http://localhost:8077",
+    "mistral":       "http://localhost:8077",
+    "o3":       "http://localhost:8001",
 }
 
 # Your master API key injected into every upstream request
-UPSTREAM_API_KEY = "endlesswork"
+UPSTREAM_API_KEY = ""
 
 # DB_EXTRA_FIELDS: informational, tracked in RequestLog.extra_json
 DB_EXTRA_FIELDS = ["model", "prompt_tokens", "completion_tokens"]
@@ -30,7 +35,7 @@ POST_TEST = {
     "type": "post",
     "end_point": "/v0/chat/completions",
     "params": {
-    "model": "kimi-k3",
+    "model": "deepseek-v4-flash",
     "messages": [
         {"role": "user", "content": "你好，简单介绍一下你自己"}
     ]
@@ -47,7 +52,7 @@ client = OpenAI(
 
 # Chat completion
 response = client.chat.completions.create(
-    model="gpt5",  # 'openrouter:openai/gpt-5.4-nano',''openrouter:openai/gpt-4o-mini','openrouter:deepseek/deepseek-v4-pro', 'openrouter:deepseek/deepseek-v4-flash', 'openrouter:deepseek/deepseek-v3.2'
+    model="deepseek-v4-flash",  # 有其他模型，很多，懒得写，自己试去吧
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(response.choices[0].message.content)
@@ -55,7 +60,7 @@ print(response.choices[0].message.content)
 # ====== 自己调用 ======
 import requests
 
-url = "http://api.apollodorus.xyz/v1/chat/completions"
+url = "https://api.apollodorus.xyz/v0/chat/completions"
 
 headers = {
     "Authorization": "Bearer YOUR_API_KEY",
@@ -63,7 +68,7 @@ headers = {
 }
 
 data = {
-    "model": "gpt-4.1-mini",
+    "model": "deepseek-v4-flash",
     "messages": [
         {"role": "user", "content": "你好，简单介绍一下你自己"}
     ]

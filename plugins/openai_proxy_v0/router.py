@@ -11,22 +11,18 @@ Supports both streaming and non-streaming responses.
 - V3 模型（Pegasus/ 前缀）：从 "openai_proxy_v3" bucket 扣除，
   转发到 localhost:8011，转发前剥离 "Pegasus/" 前缀
 - 特殊 V2 -> V1 模型映射：提供短名称供调用并扣除 v1 配额，长名称保留 v2 属性。
-- Claude (Anthropic Messages API)：从 "openai_proxy" bucket 扣除（与 OpenAI 请求共用），
-  转发到 config.CLAUDE_UPSTREAM_BASE 的 /v1/messages（即 arting2api 服务新增的 Anthropic 兼容端点）
 """
 import asyncio
-import hashlib
+import json
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db, User, ApiKey
+from core.database import get_db, User
 from core.quota import get_current_user, require_quota, log_request
-from core.auth_utils import decode_token
-from plugins.openai_proxy_v0 import config
+from plugins.openai_proxy import config
 
 import logging
 
@@ -35,6 +31,13 @@ logger = logging.getLogger(__name__)
 PLUGIN_PREFIX = ""
 PLUGIN_NAME = "openai_proxy_v0"
 
+# 流式响应中，即使 HTTP 状态码是 200，也可能在首个 SSE 事件里内嵌错误，
+# 或者上游（例如经过 Cloudflare Tunnel 的 origin 超时）直接返回一段 HTML 错误页。
+# 这个值控制针对这类"伪 200 / 网关错误"的最大重试次数。
+MAX_STREAM_ERROR_RETRIES = 3
+
+# 非流式请求遇到上游错误时的最大重试次数。
+MAX_REQUEST_RETRIES = 3
 
 
 # ==========================================================
@@ -54,9 +57,7 @@ def _resolve(model: str) -> tuple[str, str, str]:
       5. fallback      → v1 最后一个上游
     """
     model_lower = model.lower()
-    if model_lower not in ['kimi-k3']:
-        logger.info(f"不允许的模型名{model_lower}，已替换为 kimi-k3")
-        model_lower="kimi-k3"
+
     # ── 4. v1：前缀路由 ────────────────────────────────────────────────────────
     for prefix, url in config.UPSTREAM_ROUTES.items():
         if model_lower.startswith(prefix):
@@ -72,9 +73,162 @@ def _prepare_body(body: dict, effective_plugin: str) -> dict:
     """
     model = body.get("model", "")
 
-
-
     return body
+
+
+def _extract_sse_payload(line: str) -> str:
+    """
+    从一行 SSE 文本中提取 data 部分（去掉 "data:" 前缀），
+    如果不是 data 行则原样返回去除首尾空白后的内容。
+    """
+    stripped = line.strip()
+    if stripped.startswith("data:"):
+        return stripped[len("data:"):].strip()
+    return stripped
+
+
+def _looks_like_html_error(text) -> bool:
+    """
+    判断一段文本是否是 HTML 错误页（典型如 Cloudflare 524/502 的网关超时页面）。
+    上游经 Cloudflare Tunnel 暴露时，origin 超时会返回一段 HTML 而非 JSON，
+    HTTP 状态码有时还会在中间层被改写成 200，因此需要按内容识别。
+    """
+    if not isinstance(text, str):
+        return False
+    lowered = text[:2000].lower()
+    return (
+        "<!doctype html" in lowered
+        or "<html" in lowered
+        or "error code 524" in lowered
+        or "a timeout occurred" in lowered
+        or "cf-error" in lowered
+        or "cloudflare" in lowered and "error" in lowered
+    )
+
+
+def _is_stream_error_payload(payload: str) -> bool:
+    """
+    判断某个 SSE data payload 是否代表上游返回的"伪 200"错误：
+      - 事件体是 JSON 且包含 "error" 字段，或
+      - 事件体其实是一段 HTML 网关错误页（非 JSON）。
+    """
+    if not payload or payload == "[DONE]":
+        return False
+    if _looks_like_html_error(payload):
+        return True
+    try:
+        parsed = json.loads(payload)
+    except Exception:
+        return False
+    return _is_error_body(parsed)
+
+
+def _is_error_body(parsed) -> bool:
+    """
+    判断一个已解析的 JSON 响应体是否代表错误
+    （无论 HTTP 状态码是多少，只要 body 里带 "error" 字段就算）。
+    用于非流式响应中"状态码 200 但内容是错误"的情况。
+    """
+    return isinstance(parsed, dict) and "error" in parsed
+
+
+async def _open_stream_with_retry(
+    upstream_url: str,
+    upstream_body: dict,
+    headers: dict,
+    max_retries: int = MAX_STREAM_ERROR_RETRIES,
+):
+    """
+    打开上游流式连接，并在开始向客户端转发之前完成错误校验与重试。
+
+    校验项（任一命中即视为上游错误，关闭连接后重试）：
+      1. HTTP 状态码 >= 400（例如 Cloudflare 524 网关超时）。
+      2. Content-Type 是 text/html（网关错误页，状态码可能被改写成 200）。
+      3. 首个非空 SSE 行是"伪 200"错误（JSON 里含 error，或本身是 HTML）。
+      4. 建立连接时抛出网络异常。
+
+    成功时返回 (client, stream_cm, response, line_iter, first_line)，调用方负责
+    在消费完毕后关闭 stream_cm 与 client。first_line 是已经预读出来的第一行
+    （可能为 None），需要由调用方先行 yield，再继续消费 line_iter。
+
+    重试全部失败时抛出 HTTPException，此时尚未开始流式响应，客户端能拿到正确状态码。
+    """
+    attempt = 0
+    last_status = 502
+    last_body = ""
+
+    while attempt <= max_retries:
+        client = httpx.AsyncClient(timeout=None)
+        stream_cm = client.stream("POST", upstream_url, json=upstream_body, headers=headers)
+        try:
+            resp = await stream_cm.__aenter__()
+        except Exception as exc:
+            logger.error(
+                f"[STREAM CONNECT ERROR] {exc} (attempt={attempt})"
+            )
+            await client.aclose()
+            last_status = 502
+            last_body = str(exc)
+            attempt += 1
+            continue
+
+        content_type = resp.headers.get("content-type", "").lower()
+        bad_status = resp.status_code >= 400
+        html_error = "text/html" in content_type
+
+        if bad_status or html_error:
+            body_bytes = await resp.aread()
+            body_text = body_bytes.decode("utf-8", "replace")
+            logger.error(
+                f"[STREAM UPSTREAM ERROR] status={resp.status_code} "
+                f"content_type={content_type!r} attempt={attempt} "
+                f"body={body_text[:300]!r}"
+            )
+            last_status = resp.status_code if bad_status else 502
+            last_body = body_text
+            await stream_cm.__aexit__(None, None, None)
+            await client.aclose()
+            attempt += 1
+            continue
+
+        # 状态码与 Content-Type 都正常，再预读第一行，兜住"伪 200"错误。
+        line_iter = resp.aiter_lines()
+        first_line = None
+        try:
+            async for line in line_iter:
+                if not line:
+                    continue
+                first_line = line
+                break
+        except Exception as exc:
+            logger.error(f"[STREAM READ ERROR] {exc} (attempt={attempt})")
+            await stream_cm.__aexit__(None, None, None)
+            await client.aclose()
+            last_status = 502
+            last_body = str(exc)
+            attempt += 1
+            continue
+
+        if first_line is not None:
+            payload = _extract_sse_payload(first_line)
+            if _is_stream_error_payload(payload):
+                logger.error(
+                    f"[STREAM UPSTREAM ERROR embedded] {payload[:300]!r} "
+                    f"(attempt={attempt})"
+                )
+                last_status = 502
+                last_body = payload
+                await stream_cm.__aexit__(None, None, None)
+                await client.aclose()
+                attempt += 1
+                continue
+
+        return client, stream_cm, resp, line_iter, first_line
+
+    # 重试用尽：此时还没开始流式，返回真实错误码。
+    status_code = last_status if last_status >= 400 else 502
+    detail = {"error": last_body[:2000] or "upstream stream error"}
+    raise HTTPException(status_code=status_code, detail=detail)
 
 
 async def _proxy_request(
@@ -82,6 +236,7 @@ async def _proxy_request(
     body: dict,
     user: User,
     db: AsyncSession,
+    retries=0
 ):
     model = body.get("model", "")
     if not model:
@@ -109,20 +264,31 @@ async def _proxy_request(
     )
 
     if is_stream:
+        # 在开始向客户端流式转发之前，先完成上游连接、状态码与首行错误校验并重试。
+        # 只有确认上游正常后才创建 StreamingResponse，避免把 Cloudflare 524 之类的
+        # HTML 错误页当成 200 内容原样吐给客户端。
+        client, stream_cm, resp, line_iter, first_line = await _open_stream_with_retry(
+            upstream_url, upstream_body, headers, MAX_STREAM_ERROR_RETRIES
+        )
+        logger.info(f"[UPSTREAM HEADERS] {resp.headers}")
+
         async def generate():
-            async with httpx.AsyncClient(timeout=None) as client:
+            try:
+                if first_line is not None:
+                    yield f"{first_line.strip()}\n\n"
+                async for line in line_iter:
+                    if not line:
+                        continue
+                    yield f"{line.strip()}\n\n"
+            except Exception as e:
+                logger.error(f"[STREAM ERROR] {e}")
+                raise
+            finally:
                 try:
-                    async with client.stream(
-                        "POST", upstream_url, json=upstream_body, headers=headers
-                    ) as resp:
-                        logger.info(f"[UPSTREAM HEADERS] {resp.headers}")
-                        # 原样透传字节流，不按行重新拼接 —— 按行拼接会把多行一组的 SSE 事件
-                        # （例如 Anthropic 的 event: + data: 两行结构）拆坏。
-                        async for chunk in resp.aiter_bytes():
-                            yield chunk
-                except Exception as e:
-                    logger.error(f"[STREAM ERROR] {e}")
-                    raise
+                    await stream_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                await client.aclose()
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -130,6 +296,7 @@ async def _proxy_request(
         async with httpx.AsyncClient(timeout=None) as client:
             resp = await client.post(upstream_url, json=upstream_body, headers=headers)
 
+        content_type = resp.headers.get("content-type", "").lower()
         try:
             resp_json = resp.json()
         except Exception:
@@ -143,8 +310,28 @@ async def _proxy_request(
             "stream": False,
         })
 
-        if resp.status_code >= 400:
-            raise HTTPException(status_code=resp.status_code, detail=resp_json)
+        # 判定上游是否失败：真实错误码、body 里带 error 字段（含解析失败时合成的），
+        # 或 Content-Type/正文其实是 HTML 网关错误页（可能被改写成 200）。
+        html_error = "text/html" in content_type or _looks_like_html_error(
+            resp_json.get("error") if isinstance(resp_json, dict) else resp.text
+        )
+        is_upstream_error = (
+            resp.status_code >= 400
+            or _is_error_body(resp_json)
+            or html_error
+        )
+
+        if is_upstream_error:
+            if retries >= MAX_REQUEST_RETRIES:
+                status_code = resp.status_code if resp.status_code >= 400 else 502
+                raise HTTPException(status_code=status_code, detail=resp_json)
+            else:
+                logger.error(
+                    f"[UPSTREAM ERROR] status={resp.status_code} "
+                    f"content_type={content_type!r} html_error={html_error} | "
+                    f"RETRYING ({retries + 1}/{MAX_REQUEST_RETRIES})......."
+                )
+                return await _proxy_request(path, body, user, db, retries + 1)
 
         return resp_json
 
@@ -209,16 +396,13 @@ async def list_models(user: User = Depends(get_current_user)):
     # 去重提取各上游任务
     unique_v1 = {url: config.UPSTREAM_API_KEY for url in config.UPSTREAM_ROUTES.values()}
 
-
     v1_tasks = [fetch_models(url, key) for url, key in unique_v1.items()]
-
 
     # 并发请求全部上游
     all_results = await asyncio.gather(*(v1_tasks))
 
     # 拆分结果用于有序合并
     v1_results = all_results[:len(v1_tasks)]
-
 
     # 合并去重字典 (Python 3.7+ 字典保持插入顺序)
     merged: dict[str, dict] = {}
@@ -229,138 +413,4 @@ async def list_models(user: User = Depends(get_current_user)):
             if "id" in m:
                 merged[m["id"]] = m
 
-
     return {"object": "list", "data": list(merged.values())}
-
-
-# ==========================================================
-# Claude (Anthropic Messages API) 兼容端点 —— 全新增，不影响以上任何逻辑
-# ==========================================================
-
-def _hash_key(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
-
-
-async def get_current_user_claude(
-    x_api_key: str | None = Header(default=None, alias="x-api-key"),
-    authorization: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """
-    Claude Code CLI 默认用 `x-api-key` 传凭证，不是 `Authorization: Bearer`。
-    这里复刻 core/quota.py::get_current_user 的两条鉴权路径
-    （sk- API Key 查库 / JWT），只是凭证来源换成 x-api-key
-    （同时兼容 Authorization: Bearer，防止个别客户端习惯不同）。
-    不修改 core/quota.py 本身，用户的 sk- API Key 在两条路径下通用。
-    """
-    token = x_api_key or (authorization.removeprefix("Bearer ").strip() if authorization else None)
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Set x-api-key header.")
-
-    # ── Path 1: API Key (starts with "sk-") ──────────────────────────────────
-    if token.startswith("sk-"):
-        key_hash = _hash_key(token)
-        result = await db.execute(
-            select(ApiKey).where(ApiKey.key_hash == key_hash, ApiKey.is_active == True)
-        )
-        api_key = result.scalar_one_or_none()
-        if not api_key:
-            raise HTTPException(status_code=401, detail="Invalid or revoked API key")
-
-        user_result = await db.execute(select(User).where(User.id == api_key.user_id))
-        user = user_result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-
-    # ── Path 2: JWT Bearer token ──────────────────────────────────────────────
-    payload = decode_token(token)
-    user_id = int(payload.get("sub", 0))
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-
-@router.post("/v0/messages")
-async def anthropic_messages(
-    request: Request,
-    user: User = Depends(get_current_user_claude),
-    db: AsyncSession = Depends(get_db),
-):
-    body = await request.json()
-    model = body.get("model", "unknown")
-    is_stream = bool(body.get("stream", False))
-
-    # 与 OpenAI 请求共用同一个 "openai_proxy" 配额 bucket。
-    # 如果想让 Claude Code 走独立配额，告诉我一声，加一个新的
-    # plugins/openai_proxy_claude/config.py 就够了，不需要新建整个插件。
-    await require_quota(PLUGIN_NAME)(user=user, db=db)
-
-    upstream_url = f"{config.CLAUDE_UPSTREAM_BASE}/v0/messages"
-    headers = {
-        "x-api-key": config.CLAUDE_UPSTREAM_API_KEY,
-        "content-type": "application/json",
-        "anthropic-version": request.headers.get("anthropic-version", "2023-06-01"),
-    }
-
-    logger.info(f"Proxying Claude '{model}' -> {upstream_url} (stream={is_stream})")
-
-    if is_stream:
-        async def generate():
-            async with httpx.AsyncClient(timeout=None) as client:
-                try:
-                    async with client.stream(
-                        "POST", upstream_url, json=body, headers=headers
-                    ) as resp:
-                        async for chunk in resp.aiter_bytes():
-                            yield chunk
-                except Exception as e:
-                    logger.error(f"[CLAUDE STREAM ERROR] {e}")
-                    raise
-
-        return StreamingResponse(generate(), media_type="text/event-stream")
-
-    async with httpx.AsyncClient(timeout=None) as client:
-        resp = await client.post(upstream_url, json=body, headers=headers)
-
-    try:
-        resp_json = resp.json()
-    except Exception:
-        resp_json = {"error": resp.text}
-
-    usage = (resp_json.get("usage") or {}) if isinstance(resp_json, dict) else {}
-    await log_request(db, user, PLUGIN_NAME, "/v0/messages", resp.status_code, {
-        "model": model,
-        "prompt_tokens": usage.get("input_tokens", 0),
-        "completion_tokens": usage.get("output_tokens", 0),
-        "stream": False,
-    })
-
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=resp_json)
-
-    return resp_json
-
-
-@router.post("/v0/messages/count_tokens")
-async def anthropic_count_tokens(
-    request: Request,
-    user: User = Depends(get_current_user_claude),
-):
-    """
-    轻量转发，不计入配额（跟聊天请求本身比起来量级很小，
-    如果你希望它也扣配额，把 require_quota 那行从上面搬一份过来即可）。
-    """
-    body = await request.json()
-    upstream_url = f"{config.CLAUDE_UPSTREAM_BASE}/v0/messages/count_tokens"
-    headers = {"x-api-key": config.CLAUDE_UPSTREAM_API_KEY, "content-type": "application/json"}
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(upstream_url, json=body, headers=headers)
-
-    try:
-        return resp.json()
-    except Exception:
-        return {"input_tokens": 1}
