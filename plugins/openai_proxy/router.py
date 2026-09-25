@@ -14,6 +14,7 @@ Supports both streaming and non-streaming responses.
 """
 import asyncio
 import json
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,6 +39,19 @@ MAX_STREAM_ERROR_RETRIES = 3
 
 # 非流式请求遇到上游错误时的最大重试次数。
 MAX_REQUEST_RETRIES = 3
+
+# 并发与超时控制：最多同时发起 6 个请求，超出的排队等待，总超时（含排队与请求）为 150 秒。
+MAX_CONCURRENT_REQUESTS = 6
+QUEUE_TIMEOUT_SECONDS = 150.0
+
+_request_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_request_semaphore() -> asyncio.Semaphore:
+    global _request_semaphore
+    if _request_semaphore is None:
+        _request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+    return _request_semaphore
 
 
 # ==========================================================
@@ -231,13 +245,19 @@ async def _open_stream_with_retry(
     raise HTTPException(status_code=status_code, detail=detail)
 
 
-async def _proxy_request(
+async def _proxy_request_core(
     path: str,
     body: dict,
     user: User,
     db: AsyncSession,
+    start_time: float,
     retries=0
 ):
+    elapsed = time.monotonic() - start_time
+    remaining_time = max(0.0, QUEUE_TIMEOUT_SECONDS - elapsed)
+    if remaining_time <= 0:
+        raise asyncio.TimeoutError("Request exceeded total timeout limit of 150s.")
+
     model = body.get("model", "")
     if not model:
         raise HTTPException(status_code=400, detail="'model' field is required")
@@ -276,7 +296,16 @@ async def _proxy_request(
             try:
                 if first_line is not None:
                     yield f"{first_line.strip()}\n\n"
-                async for line in line_iter:
+                while True:
+                    cur_elapsed = time.monotonic() - start_time
+                    rem = QUEUE_TIMEOUT_SECONDS - cur_elapsed
+                    if rem <= 0:
+                        logger.error(f"[STREAM TIMEOUT] Stream exceeded total timeout of {QUEUE_TIMEOUT_SECONDS}s.")
+                        raise asyncio.TimeoutError("Stream exceeded total timeout limit of 150s.")
+                    try:
+                        line = await asyncio.wait_for(line_iter.__anext__(), timeout=rem)
+                    except StopAsyncIteration:
+                        break
                     if not line:
                         continue
                     yield f"{line.strip()}\n\n"
@@ -293,7 +322,9 @@ async def _proxy_request(
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     else:
-        async with httpx.AsyncClient(timeout=None) as client:
+        elapsed_now = time.monotonic() - start_time
+        call_timeout = max(0.001, QUEUE_TIMEOUT_SECONDS - elapsed_now)
+        async with httpx.AsyncClient(timeout=call_timeout) as client:
             resp = await client.post(upstream_url, json=upstream_body, headers=headers)
 
         content_type = resp.headers.get("content-type", "").lower()
@@ -331,9 +362,80 @@ async def _proxy_request(
                     f"content_type={content_type!r} html_error={html_error} | "
                     f"RETRYING ({retries + 1}/{MAX_REQUEST_RETRIES})......."
                 )
-                return await _proxy_request(path, body, user, db, retries + 1)
+                return await _proxy_request_core(path, body, user, db, start_time, retries + 1)
 
         return resp_json
+
+
+async def _proxy_request(
+    path: str,
+    body: dict,
+    user: User,
+    db: AsyncSession,
+):
+    """
+    控制最大并发为 6 个请求，超出的排队等待。
+    排队和执行过程总超时为 150 秒，超时自动取消并释放并发槽。
+    """
+    sem = _get_request_semaphore()
+    start_time = time.monotonic()
+
+    # 排队获取并发槽位（最多排队 150 秒）
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=QUEUE_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        logger.warning(f"[CONCURRENCY QUEUE TIMEOUT] Request queued for over {QUEUE_TIMEOUT_SECONDS}s, aborted.")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Too many concurrent requests, queue wait timed out after {int(QUEUE_TIMEOUT_SECONDS)}s."
+        )
+
+    released = False
+
+    def release_sem():
+        nonlocal released
+        if not released:
+            released = True
+            sem.release()
+
+    try:
+        elapsed = time.monotonic() - start_time
+        remaining = max(0.0, QUEUE_TIMEOUT_SECONDS - elapsed)
+        if remaining <= 0:
+            raise asyncio.TimeoutError("Request timed out before execution.")
+
+        result = await asyncio.wait_for(
+            _proxy_request_core(path, body, user, db, start_time=start_time, retries=0),
+            timeout=remaining
+        )
+
+        # 流式响应需在流完全消费完毕或连接中断时释放并发槽
+        if isinstance(result, StreamingResponse):
+            original_body_iterator = result.body_iterator
+
+            async def wrapped_body_iterator():
+                try:
+                    async for chunk in original_body_iterator:
+                        yield chunk
+                finally:
+                    release_sem()
+
+            result.body_iterator = wrapped_body_iterator()
+            return result
+        else:
+            release_sem()
+            return result
+
+    except asyncio.TimeoutError:
+        release_sem()
+        logger.warning(f"[REQUEST TIMEOUT] Request timed out after {QUEUE_TIMEOUT_SECONDS}s.")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Request timed out after {int(QUEUE_TIMEOUT_SECONDS)}s."
+        )
+    except Exception:
+        release_sem()
+        raise
 
 
 # ---------- Endpoints ----------
