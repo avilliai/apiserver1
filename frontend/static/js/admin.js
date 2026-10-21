@@ -1,109 +1,158 @@
-/* Apollodorus 前端 — 由 index.html 拆分而来；所有文件共享全局作用域，按 index.html 中的顺序加载。 */
-/* ADMIN: USERS */
-// 原始用户列表（全量，用于筛选）
-let _allUsers = [];
-// 当前展示的用户（筛选后）
-let _visibleUsers = [];
-// 已选中的用户 id 集合
-let _selectedIds = new Set();
+/* Apollodorus 2.0 // Admin Command Terminal & Telemetry */
 
+let _adminUsers = [];
+let _selectedIds = new Set();
+let _usersPluginsLoaded = false;
+
+/* ADMIN: USERS */
 async function loadAdminUsers() {
   try {
-    _allUsers = await apiFetch('/api/admin/users');
-    _populatePluginSelectors(_allUsers);
-    _visibleUsers = _allUsers;
-    _renderUsersTable(_visibleUsers);
-  } catch(e) { toast(e.message, 'error'); }
+    const users = await apiFetch('/api/admin/users');
+    _adminUsers = users || [];
+    _populatePluginSelectors();
+    _renderUsersTable(_adminUsers);
+    _syncBatchToolbar();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
-/** 从用户列表中收集所有插件名，填充筛选/批量下拉框 */
-function _populatePluginSelectors(users) {
-  const plugins = new Set();
-  users.forEach(u => Object.keys(u.quota || {}).forEach(p => plugins.add(p)));
-  const opts = ['<option value="">All Plugins</option>',
-    ...[...plugins].sort().map(p => `<option value="${p}">${p}</option>`)].join('');
-  document.getElementById('filter-plugin').innerHTML = opts;
-  const batchOpts = ['<option value="">— Select Plugin —</option>',
-    ...[...plugins].sort().map(p => `<option value="${p}">${p}</option>`)].join('');
-  document.getElementById('batch-plugin').innerHTML = batchOpts;
+function _populatePluginSelectors() {
+  if (_usersPluginsLoaded || !Array.isArray(S.plugins) || !S.plugins.length) return;
+  const filterSel = document.getElementById('filter-plugin');
+  const batchSel = document.getElementById('batch-plugin');
+
+  const filterOpts = ['<option value="">所有接口插件 (All Plugins)</option>',
+    ...S.plugins.map(p => `<option value="${escHtml(p.name)}">${escHtml(p.display_name || p.name)}</option>`)
+  ].join('');
+
+  const batchOpts = ['<option value="">-- 选择目标插件模块 --</option>',
+    ...S.plugins.map(p => `<option value="${escHtml(p.name)}">${escHtml(p.display_name || p.name)}</option>`)
+  ].join('');
+
+  if (filterSel) filterSel.innerHTML = filterOpts;
+  if (batchSel) batchSel.innerHTML = batchOpts;
+  _usersPluginsLoaded = true;
 }
 
-/** 渲染用户表格，保留已选中状态 */
 function _renderUsersTable(users) {
-  document.querySelector('#admin-users-table tbody').innerHTML = users.map(u => `
-    <tr id="urow-${u.id}" class="${_selectedIds.has(u.id) ? 'row-selected' : ''}">
-      <td style="padding:11px 6px 11px 10px">
-        <input type="checkbox" class="user-cb" data-uid="${u.id}"
-          style="width:14px;height:14px;cursor:pointer;accent-color:var(--accent)"
-          ${_selectedIds.has(u.id) ? 'checked' : ''}
-          onchange="toggleUserSelect(${u.id}, this.checked)" />
-      </td>
-      <td style="color:var(--text);font-weight:600;font-size:13.5px">${u.username}${u.is_banned?' <span class="tag tag-red" style="font-size:9px">banned</span>':''}</td>
-      <td><span class="badge ${u.is_admin?'badge-admin':'badge-user'}">${u.is_admin?'admin':'user'}</span></td>
-      <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${fmt(u.created_at)}</td>
-      <td style="color:var(--text2)">${Object.keys(u.quota || {}).length}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick='openUserModal(${JSON.stringify(u).replace(/'/g,"&#39;")})'>Manage</button></td>
-    </tr>`).join('');
+  const tbody = document.querySelector('#admin-users-table tbody');
+  if (!tbody) return;
+  if (!users || !users.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:32px">未检索到匹配的系统用户</td></tr>';
+    _syncSelectAllCheckbox();
+    return;
+  }
+
+  tbody.innerHTML = users.map(u => {
+    const isSelected = _selectedIds.has(u.id);
+    const quotaEntries = Object.entries(u.quota || {});
+    let quotaSummary = '<span class="text-muted" style="font-size:11px">无配置</span>';
+    if (quotaEntries.length) {
+      quotaSummary = quotaEntries.slice(0, 3).map(([p, q]) => {
+        const isUnlim = q.limit == null;
+        const pct = isUnlim ? 0 : Math.round(((q.used || 0) / q.limit) * 100);
+        const tagCls = isUnlim ? 'tag-green' : pct >= 90 ? 'tag-red' : pct >= 70 ? 'tag-amber' : 'tag-teal';
+        return `<span class="tag ${tagCls}" style="margin:2px" title="${escHtml(p)}: ${q.used}/${isUnlim?'∞':q.limit}">${escHtml(p)}: ${q.used}/${isUnlim?'∞':q.limit}</span>`;
+      }).join('');
+      if (quotaEntries.length > 3) {
+        quotaSummary += `<span class="text-muted" style="font-size:11px;margin-left:4px">+${quotaEntries.length - 3}</span>`;
+      }
+    }
+
+    const roleBadge = u.is_admin ? '<span class="tag tag-cyan">ADMIN</span>' : '<span class="tag tag-slate">USER</span>';
+    const banBadge = u.is_banned ? '<span class="tag tag-red">已封禁</span>' : '<span class="tag tag-green">正常</span>';
+
+    return `
+      <tr class="${isSelected ? 'selected' : ''}" style="${u.is_banned ? 'opacity:0.6' : ''}">
+        <td style="text-align:center;width:40px">
+          <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleUserSelect(${u.id}, this.checked)" style="accent-color:var(--cyan);cursor:pointer" />
+        </td>
+        <td style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-tertiary)">#${u.id}</td>
+        <td>
+          <div style="font-weight:600;font-size:13.5px;color:var(--text-primary)">${escHtml(u.username)}</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">注册于: ${fmt(u.created_at)}</div>
+        </td>
+        <td>${roleBadge} ${banBadge}</td>
+        <td><div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">${quotaSummary}</div></td>
+        <td style="text-align:right">
+          <button class="btn btn-secondary btn-sm" onclick="openUserModalById(${u.id})">
+            <span>配额 & 治理</span>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
   _syncSelectAllCheckbox();
 }
 
-/** 切换单个用户的勾选状态 */
 function toggleUserSelect(uid, checked) {
   if (checked) _selectedIds.add(uid);
   else _selectedIds.delete(uid);
-  const row = document.getElementById(`urow-${uid}`);
-  if (row) row.classList.toggle('row-selected', checked);
-  _syncBatchToolbar();
   _syncSelectAllCheckbox();
-}
-
-/** 全选 / 取消全选（仅作用于当前可见行） */
-function toggleSelectAll(checked) {
-  _visibleUsers.forEach(u => {
-    if (checked) _selectedIds.add(u.id);
-    else _selectedIds.delete(u.id);
-    const row = document.getElementById(`urow-${u.id}`);
-    if (row) row.classList.toggle('row-selected', checked);
-    const cb = row && row.querySelector('.user-cb');
-    if (cb) cb.checked = checked;
-  });
   _syncBatchToolbar();
 }
 
-/** 同步全选框的半选/全选/未选状态 */
-function _syncSelectAllCheckbox() {
-  const allCb = document.getElementById('select-all-cb');
-  if (!allCb) return;
-  const total = _visibleUsers.length;
-  const sel   = _visibleUsers.filter(u => _selectedIds.has(u.id)).length;
-  allCb.checked = sel > 0 && sel === total;
-  allCb.indeterminate = sel > 0 && sel < total;
+function toggleSelectAll(checked) {
+  const visibleUids = _getCurrentFilteredUsers().map(u => u.id);
+  if (checked) {
+    visibleUids.forEach(id => _selectedIds.add(id));
+  } else {
+    visibleUids.forEach(id => _selectedIds.delete(id));
+  }
+  _renderUsersTable(_getCurrentFilteredUsers());
+  _syncBatchToolbar();
 }
 
-/** 显示/隐藏批量操作栏 */
+function _syncSelectAllCheckbox() {
+  const cb = document.getElementById('select-all-users');
+  if (!cb) return;
+  const visible = _getCurrentFilteredUsers();
+  if (!visible.length) {
+    cb.checked = false;
+    cb.indeterminate = false;
+    return;
+  }
+  const selectedCount = visible.filter(u => _selectedIds.has(u.id)).length;
+  cb.checked = selectedCount === visible.length;
+  cb.indeterminate = selectedCount > 0 && selectedCount < visible.length;
+}
+
 function _syncBatchToolbar() {
   const bar = document.getElementById('batch-toolbar');
-  const cnt = document.getElementById('batch-count');
-  const n = _selectedIds.size;
-  bar.style.display = n > 0 ? '' : 'none';
-  cnt.textContent = n;
+  const countEl = document.getElementById('batch-selected-count');
+  if (!bar) return;
+  const count = _selectedIds.size;
+  if (count > 0) {
+    bar.style.display = 'flex';
+    if (countEl) countEl.textContent = count;
+  } else {
+    bar.style.display = 'none';
+  }
 }
 
 function clearBatchSelection() {
   _selectedIds.clear();
-  _renderUsersTable(_visibleUsers);
+  _renderUsersTable(_getCurrentFilteredUsers());
   _syncBatchToolbar();
 }
 
-/** 批量操作：插件切换时清空 limit 输入框占位符提示 */
-function onBatchPluginChange() {}
+function onBatchPluginChange() {
+  const p = document.getElementById('batch-plugin')?.value;
+  const hint = document.getElementById('batch-quota-hint');
+  if (!hint) return;
+  if (!p) { hint.textContent = ''; return; }
+  const found = (S.plugins || []).find(x => x.name === p);
+  hint.textContent = found && found.quota_default != null ? `(默认: ${found.quota_default}次)` : '(默认: 无限制)';
+}
 
-/** 批量设置 limit */
 async function batchSetLimit() {
-  const plugin = document.getElementById('batch-plugin').value;
-  const raw    = document.getElementById('batch-limit-val').value;
-  if (!plugin) { toast('请先选择插件', 'error'); return; }
-  if (!_selectedIds.size) { toast('未选中任何用户', 'error'); return; }
+  const plugin = document.getElementById('batch-plugin')?.value;
+  const raw = document.getElementById('batch-limit-val')?.value;
+  if (!plugin) { toast('请先选择要调整的插件接口', 'error'); return; }
+  if (!_selectedIds.size) { toast('未勾选任何用户', 'error'); return; }
+
   const limit = raw === '' ? null : parseInt(raw, 10);
   const ids = [..._selectedIds];
   let ok = 0, fail = 0;
@@ -114,397 +163,530 @@ async function batchSetLimit() {
         body: JSON.stringify({ plugin, limit })
       });
       ok++;
-    } catch { fail++; }
+    } catch (_) { fail++; }
   }));
-  toast(`Set limit → ${ok} ok${fail ? ', ' + fail + ' failed' : ''}`, fail ? 'error' : 'success');
-  await loadAdminUsers();
+  toast(`批量修改上限完成: 成功 ${ok} 人, 失败 ${fail} 人`);
+  loadAdminUsers();
 }
 
-/** 批量重置 used 为 0 */
 async function batchResetUsed() {
-  const plugin = document.getElementById('batch-plugin').value;
-  if (!plugin) { toast('请先选择插件', 'error'); return; }
-  if (!_selectedIds.size) { toast('未选中任何用户', 'error'); return; }
+  const plugin = document.getElementById('batch-plugin')?.value;
+  if (!plugin) { toast('请先选择目标插件接口', 'error'); return; }
+  if (!_selectedIds.size) { toast('未勾选任何用户', 'error'); return; }
+
   const ids = [..._selectedIds];
   let ok = 0, fail = 0;
   await Promise.all(ids.map(async uid => {
     try {
       await apiFetch(`/api/admin/users/${uid}/reset-quota?plugin=${encodeURIComponent(plugin)}`, { method: 'POST' });
       ok++;
-    } catch { fail++; }
+    } catch (_) { fail++; }
   }));
-  toast(`Reset used → ${ok} ok${fail ? ', ' + fail + ' failed' : ''}`, fail ? 'error' : 'success');
-  await loadAdminUsers();
+  toast(`批量归零已用计数完成: 成功 ${ok} 人, 失败 ${fail} 人`);
+  loadAdminUsers();
 }
 
-/** 应用筛选条件 */
-function applyFilter() {
-  const plugin = document.getElementById('filter-plugin').value;
-  const op     = document.getElementById('filter-op').value;
-  const val    = parseFloat(document.getElementById('filter-val').value);
+function _getCurrentFilteredUsers() {
+  const search = (document.getElementById('search-user')?.value || '').trim().toLowerCase();
+  const plugin = document.getElementById('filter-plugin')?.value || '';
+  const filterState = document.getElementById('filter-state')?.value || 'all';
 
-  // 无条件时直接展示全部
-  if (!plugin && !op) { clearFilter(); return; }
-
-  _visibleUsers = _allUsers.filter(u => {
-    const quota = u.quota || {};
-
-    // 若指定了插件但用户没有该插件配额，则排除
-    if (plugin && !(plugin in quota)) return false;
-
-    // 若只选了插件没选操作符，展示拥有该插件的所有用户
-    if (!op) return true;
-
-    const entry   = plugin ? quota[plugin] : null;
-    const used    = entry ? (entry.used  ?? 0)    : 0;
-    const limit   = entry ? (entry.limit ?? null) : null;
-    const remaining = limit === null ? Infinity : Math.max(0, limit - used);
-    const pct       = limit ? (used / limit) * 100 : 0;
-
-    switch (op) {
-      case 'remaining_lt':  return remaining < val;
-      case 'remaining_lte': return remaining <= val;
-      case 'used_gt':       return used > val;
-      case 'pct_gt':        return limit !== null && pct > val;
-      case 'exhausted':     return limit !== null && used >= limit;
-      case 'unlimited':     return limit === null;
-      default:              return true;
+  return _adminUsers.filter(u => {
+    if (search && !u.username.toLowerCase().includes(search) && !String(u.id).includes(search)) return false;
+    if (plugin) {
+      const q = u.quota ? u.quota[plugin] : null;
+      if (!q) return false;
+      const isUnlim = q.limit == null;
+      const pct = isUnlim ? 0 : Math.round(((q.used || 0) / q.limit) * 100);
+      if (filterState === 'exhausted' && (isUnlim || pct < 100)) return false;
+      if (filterState === 'warn' && (isUnlim || pct < 80)) return false;
     }
+    return true;
   });
+}
 
-  _renderUsersTable(_visibleUsers);
-
-  const badge = document.getElementById('filter-result-badge');
-  badge.style.display = '';
-  badge.textContent = `${_visibleUsers.length} / ${_allUsers.length} users`;
+function applyFilter() {
+  _renderUsersTable(_getCurrentFilteredUsers());
 }
 
 function clearFilter() {
-  document.getElementById('filter-plugin').value = '';
-  document.getElementById('filter-op').value = '';
-  document.getElementById('filter-val').value = '';
-  _visibleUsers = _allUsers;
-  _renderUsersTable(_visibleUsers);
-  document.getElementById('filter-result-badge').style.display = 'none';
+  const su = document.getElementById('search-user');
+  const fp = document.getElementById('filter-plugin');
+  const fs = document.getElementById('filter-state');
+  if (su) su.value = '';
+  if (fp) fp.value = '';
+  if (fs) fs.value = 'all';
+  _renderUsersTable(_adminUsers);
 }
 
-function openUserModal(user) {
-  const rows = Object.entries(user.quota).map(([plugin, {used, limit}]) => `
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
-      <span style="flex:1;font-size:13.5px;color:var(--text)">${plugin}</span>
-      <span style="color:var(--text3);font-family:var(--mono);font-size:11px">${used} used</span>
-      <input type="number" value="${limit??''}" placeholder="∞" class="form-input" style="width:70px;padding:6px 10px;font-size:12px" id="qi-${plugin}" />
-      <button class="btn btn-ghost btn-sm" onclick="setQuota(${user.id},'${plugin}')">Set</button>
-      <button class="btn btn-ghost btn-sm" onclick="resetQuota(${user.id},'${plugin}')">Reset</button>
-    </div>`).join('');
-  const ov = document.createElement('div');
-  ov.className = 'modal-overlay';
-  ov.innerHTML = `<div class="modal"><div class="modal-head"><div class="modal-title">${escHtml(user.username)}${user.is_banned?' <span class="tag tag-red" style="font-size:10px;vertical-align:middle">banned</span>':''}</div><span class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</span></div>${rows||'<div class="text-muted">No quotas.</div>'}
-    <div style="display:flex;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">${user.is_banned
-      ? `<button class="btn btn-ghost btn-sm" onclick="unbanUser(${user.id});this.closest('.modal-overlay').remove()">解封并还原配额</button>`
-      : `<button class="btn btn-danger btn-sm" onclick="banUser(${user.id});this.closest('.modal-overlay').remove()">封禁此用户 + IP</button>`}</div>
-  </div>`;
-  ov.addEventListener('click', e => { if (e.target===ov) ov.remove(); });
-  document.body.appendChild(ov);
+function openUserModalById(id) {
+  const u = _adminUsers.find(x => x.id === id);
+  if (u) openUserModal(u);
 }
+
+function openUserModal(u) {
+  const modal = document.getElementById('user-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  document.getElementById('modal-user-title').innerHTML = `
+    <span>用户配额控制 // <strong>${escHtml(u.username)}</strong></span>
+    <span style="font-family:var(--font-mono);font-size:12px;color:var(--text-tertiary)">ID: #${u.id}</span>
+  `;
+
+  const rows = Object.entries(u.quota || {}).map(([plugin, { used, limit }]) => {
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border-dim);gap:12px">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(plugin)}</div>
+          <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary);margin-top:2px">已调用: <strong style="color:var(--cyan)">${used || 0}</strong> 次</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="qi-${plugin}" value="${limit == null ? '' : limit}" placeholder="∞ 无限" class="form-input" style="width:90px;padding:6px 10px;font-size:12px" />
+          <button class="btn btn-secondary btn-sm" onclick="setQuota(${u.id}, '${escHtml(plugin)}')">保存上限</button>
+          <button class="btn btn-danger btn-sm" onclick="resetQuota(${u.id}, '${escHtml(plugin)}')">计数归零</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('modal-quota-rows').innerHTML = rows || '<div class="text-muted" style="padding:16px 0">该用户暂无配置任何接口配额</div>';
+
+  const banActionBox = document.getElementById('modal-ban-zone');
+  if (banActionBox) {
+    banActionBox.innerHTML = u.is_banned
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(244,63,94,0.1);padding:12px 16px;border-radius:var(--radius-xs);border:1px solid var(--rose-border)">
+          <div>
+            <div style="color:var(--rose);font-weight:600;font-size:13px">⚠ 当前账户已处于封禁状态</div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">封禁时间: ${fmt(u.banned_at)} · 原因: ${escHtml(u.ban_reason || '管理员操作')}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="unbanUser(${u.id})">解除封禁 (恢复默认配额)</button>
+        </div>`
+      : `<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,0.25);padding:12px 16px;border-radius:var(--radius-xs);border:1px solid var(--border-dim)">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">风险账户封禁治理</div>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-top:2px">封禁将拉黑其历史请求 IP，并将其所有接口配额上限清零</div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="banUser(${u.id})">封禁此用户</button>
+        </div>`;
+  }
+}
+
+function closeUserModal() {
+  const modal = document.getElementById('user-modal');
+  if (modal) modal.style.display = 'none';
+}
+
 async function setQuota(uid, plugin) {
-  const v = document.getElementById(`qi-${plugin}`).value;
-  try { await apiFetch(`/api/admin/users/${uid}/quota`, { method:'POST', body: JSON.stringify({plugin, limit: v===''?null:parseInt(v)}) }); toast('Updated'); }
-  catch(e) { toast(e.message,'error'); }
-}
-async function resetQuota(uid, plugin) {
-  try { await apiFetch(`/api/admin/users/${uid}/reset-quota?plugin=${plugin}`, { method:'POST' }); toast('Reset to 0'); }
-  catch(e) { toast(e.message,'error'); }
-}
-async function banUser(uid) {
-  if (!confirm('确认封禁该用户？将封禁其历史 IP，并把其所有接口配额上限设为 0。')) return;
+  const v = document.getElementById(`qi-${plugin}`)?.value;
   try {
-    const r = await apiFetch(`/api/admin/users/${uid}/ban`, { method:'POST', body: JSON.stringify({ reason: 'banned from users page' }) });
-    toast(`已封禁：${(r.banned_ips||[]).length} 个 IP，${(r.zeroed_plugins||[]).length} 个接口配额归零`);
+    await apiFetch(`/api/admin/users/${uid}/quota`, {
+      method: 'POST',
+      body: JSON.stringify({ plugin, limit: v === '' ? null : parseInt(v, 10) })
+    });
+    toast('配额上限修改已生效');
     loadAdminUsers();
-  } catch(e) { toast(e.message,'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
+
+async function resetQuota(uid, plugin) {
+  try {
+    await apiFetch(`/api/admin/users/${uid}/reset-quota?plugin=${encodeURIComponent(plugin)}`, { method: 'POST' });
+    toast('调用计数已归零');
+    loadAdminUsers();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function banUser(uid) {
+  if (!confirm('确认封禁该用户？将封禁其历史关联 IP，并把其所有接口配额上限设为 0。')) return;
+  try {
+    const r = await apiFetch(`/api/admin/users/${uid}/ban`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'Admin panel manual ban' })
+    });
+    toast(`已封禁：${(r.banned_ips || []).length} 个 IP，${(r.zeroed_plugins || []).length} 个接口配额归零`);
+    closeUserModal();
+    loadAdminUsers();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 async function unbanUser(uid) {
-  if (!confirm('解封该用户并把配额上限还原为各接口默认值？')) return;
-  try { await apiFetch(`/api/admin/users/${uid}/unban`, { method:'POST' }); toast('已解封'); loadAdminUsers(); }
-  catch(e) { toast(e.message,'error'); }
+  if (!confirm('确认解封该用户？解封将把其各接口配额上限还原为系统默认值。')) return;
+  try {
+    await apiFetch(`/api/admin/users/${uid}/unban`, { method: 'POST' });
+    toast('已解除封禁，配额已恢复系统默认值');
+    closeUserModal();
+    loadAdminUsers();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 /* ADMIN: INVITES */
 async function loadAdminInvites() {
-  try { renderInvites(await apiFetch('/api/admin/invite/list')); }
-  catch(e) { toast(e.message,'error'); }
+  try {
+    const list = await apiFetch('/api/admin/invite/list');
+    renderInvites(list || []);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
+
 function renderInvites(list) {
   const el = document.getElementById('invite-list');
-  el.innerHTML = list.length
-    ? list.map(i => `
-        <div class="code-card">
-          <span class="code-val">${i.code}</span>
-          <span class="code-btn" onclick="navigator.clipboard.writeText('${i.code}').then(()=>toast('Copied!'))" title="Copy">⎘</span>
-          <span class="code-btn code-del" onclick="deleteInvite('${i.code}',this)" title="Delete">✕</span>
-        </div>`).join('')
-    : '<div class="text-muted">No active codes.</div>';
+  if (!el) return;
+  if (!list.length) {
+    el.innerHTML = '<div class="text-muted" style="grid-column:1/-1;text-align:center;padding:36px">暂无任何活跃的邀请码，请在上方生成</div>';
+    return;
+  }
+
+  el.innerHTML = list.map(inv => `
+    <div class="code-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span class="code-val" onclick="copyText('${inv.code}', '邀请码已复制')" title="点击复制">${escHtml(inv.code)}</span>
+        <button class="btn btn-danger btn-sm" onclick="deleteInvite('${inv.code}', this)">废除</button>
+      </div>
+      <div class="code-meta">
+        <span>签发者: <strong style="color:var(--cyan)">${escHtml(inv.created_by || 'admin')}</strong></span>
+        <span>生成于: ${fmt(inv.created_at)}</span>
+      </div>
+    </div>
+  `).join('');
 }
+
 async function generateInvites() {
-  const n = parseInt(document.getElementById('invite-count').value) || 1;
-  try { await apiFetch(`/api/admin/invite/generate?count=${n}`, { method:'POST' }); toast(`Generated ${n} code(s)`); loadAdminInvites(); }
-  catch(e) { toast(e.message,'error'); }
+  const n = parseInt(document.getElementById('invite-count')?.value, 10) || 1;
+  try {
+    await apiFetch(`/api/admin/invite/generate?count=${n}`, { method: 'POST' });
+    toast(`已成功批量签发 ${n} 个邀请码`);
+    loadAdminInvites();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
-async function deleteInvite(code, el) {
-  try { await apiFetch(`/api/admin/invite/${code}`, { method:'DELETE' }); el.closest('.code-card').remove(); toast('Deleted'); }
-  catch(e) { toast(e.message,'error'); }
+
+async function deleteInvite(code, btn) {
+  if (!confirm(`确认废除邀请码【${code}】？废除后用户将无法再使用该码注册。`)) return;
+  try {
+    await apiFetch(`/api/admin/invite/${code}`, { method: 'DELETE' });
+    btn.closest('.code-card')?.remove();
+    toast('邀请码已永久废除');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 /* ADMIN: STATS */
 async function loadAdminStats() {
   try {
     const s = await apiFetch('/api/admin/stats');
-    document.getElementById('admin-stat-cards').innerHTML = `
-      <div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value c-teal">${s.total_users}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Requests</div><div class="stat-value c-green">${s.total_requests}</div></div>
-      <div class="stat-card"><div class="stat-label">Active Plugins</div><div class="stat-value c-amber">${s.by_plugin.length}</div></div>`;
-    drawLineChart(s.daily);
-    document.getElementById('stats-by-plugin').innerHTML =
-      s.by_plugin.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-          <span class="tag tag-teal">${p.plugin}</span>
-          <span style="color:var(--text);font-family:var(--mono);font-size:13px">${p.count}</span>
-        </div>`).join('')
-      || '<div class="text-muted">No data</div>';
-    document.getElementById('stats-by-user').innerHTML =
-      s.by_user.sort((a,b)=>b.count-a.count).slice(0,10).map(u => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-          <span style="color:var(--text);font-size:13.5px;font-weight:500">${u.username}</span>
-          <span style="color:var(--text2);font-family:var(--mono);font-size:12px">${u.count}</span>
-        </div>`).join('')
-      || '<div class="text-muted">No data</div>';
-  } catch(e) { toast(e.message,'error'); }
+    const container = document.getElementById('admin-stat-cards');
+    if (container) {
+      container.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">注册用户总量</div>
+          <div class="stat-value c-teal">${s.total_users || 0}</div>
+          <div class="stat-sub">Registered Developers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">全局请求总量</div>
+          <div class="stat-value c-green">${s.total_requests || 0}</div>
+          <div class="stat-sub">All-time Cumulative Dispatches</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">活跃接口插件数</div>
+          <div class="stat-value c-cyan">${(s.by_plugin || []).length}</div>
+          <div class="stat-sub">Microservice Routes in Telemetry</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">调用用户数</div>
+          <div class="stat-value c-amber">${(s.by_user || []).length}</div>
+          <div class="stat-sub">Users with Activity History</div>
+        </div>
+      `;
+    }
+
+    drawLineChart(s.daily || []);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
-/* LINE CHART */
 function drawLineChart(daily) {
   const svg = document.getElementById('line-svg');
+  if (!svg) return;
   if (!daily || !daily.length) {
-    svg.innerHTML = '<text x="400" y="80" fill="#9ab0b2" font-size="13" text-anchor="middle" font-family="JetBrains Mono">No data</text>';
+    svg.innerHTML = '<text x="400" y="85" fill="#4a5568" font-size="12" text-anchor="middle" font-family="JetBrains Mono">[NO TELEMETRY DATA AVAILABLE]</text>';
     return;
   }
-  const W=800, H=160, PX=20, PY=16;
-  const max = Math.max(...daily.map(d=>d.count), 1);
+
+  const W = 800, H = 160, PX = 40, PY = 24;
+  const max = Math.max(...daily.map(d => d.count), 1);
   const n = daily.length;
-  const pts = daily.map((d,i) =>[
-    PX + (i/Math.max(n-1,1))*(W-PX*2),
-    PY + (1 - d.count/max)*(H-PY*2),
-    d.day, d.count
+
+  const pts = daily.map((d, i) => [
+    PX + (i / Math.max(n - 1, 1)) * (W - PX * 2),
+    PY + (1 - d.count / max) * (H - PY * 2)
   ]);
-  let area = `M ${pts[0][0]} ${H} L ${pts[0][0]} ${pts[0][1]}`;
-  let line = `M ${pts[0][0]} ${pts[0][1]}`;
-  for (let i=1; i<pts.length; i++) {
-    const [x0,y0]=pts[i-1],[x1,y1]=pts[i], cx=(x0+x1)/2;
-    area += ` C ${cx} ${y0} ${cx} ${y1} ${x1} ${y1}`;
-    line += ` C ${cx} ${y0} ${cx} ${y1} ${x1} ${y1}`;
-  }
-  area += ` L ${pts[pts.length-1][0]} ${H} Z`;
-  const step = Math.max(1, Math.floor(n/6));
-  const labels = pts.filter((_,i)=>i%step===0||i===n-1)
-    .map(([x,,day])=>`<text x="${x}" y="${H+14}" fill="#9ab0b2" font-size="9" text-anchor="middle" font-family="JetBrains Mono">${(day||'').slice(5)}</text>`)
-    .join('');
-  const dots = pts.map(([x,y,day,count])=>
-    `<circle cx="${x}" cy="${y}" r="3" fill="#5C7FAE" opacity="0.8"><title>${day}: ${count}</title></circle>`
-  ).join('');
+
+  const pathD = pts.reduce((acc, [x, y], i) => (i === 0 ? `M ${x} ${y}` : `${acc} L ${x} ${y}`), '');
+  const areaD = `${pathD} L ${pts[pts.length - 1][0]} ${H - PY} L ${pts[0][0]} ${H - PY} Z`;
+
+  let circles = '';
+  pts.forEach(([x, y], i) => {
+    circles += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="#00f0ff" stroke="#06070a" stroke-width="2">
+      <title>${daily[i].day}: ${daily[i].count} 次请求</title>
+    </circle>`;
+  });
+
   svg.innerHTML = `
     <defs>
-      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#93B2D8" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#93B2D8" stop-opacity="0.02"/>
+      <linearGradient id="cyber-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.3" />
+        <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.0" />
       </linearGradient>
     </defs>
-    <path d="${area}" fill="url(#ag)"/>
-    <path d="${line}" fill="none" stroke="#5C7FAE" stroke-width="2" stroke-opacity="0.9"/>
-    ${dots}${labels}`;
+    <!-- Gridlines -->
+    <line x1="${PX}" y1="${PY}" x2="${W - PX}" y2="${PY}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4" />
+    <line x1="${PX}" y1="${H / 2}" x2="${W - PX}" y2="${H / 2}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="4" />
+    <line x1="${PX}" y1="${H - PY}" x2="${W - PX}" y2="${H - PY}" stroke="rgba(255,255,255,0.08)" />
+
+    <!-- Fill & Line -->
+    <path d="${areaD}" fill="url(#cyber-grad)" />
+    <path d="${pathD}" fill="none" stroke="#00f0ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+    ${circles}
+
+    <!-- Labels -->
+    <text x="${PX}" y="${H - 6}" fill="#718096" font-size="10" font-family="JetBrains Mono">${daily[0].day || ''}</text>
+    <text x="${W - PX}" y="${H - 6}" fill="#718096" font-size="10" text-anchor="end" font-family="JetBrains Mono">${daily[daily.length - 1].day || ''}</text>
+    <text x="${PX - 6}" y="${PY + 4}" fill="#00f0ff" font-size="10" text-anchor="end" font-family="JetBrains Mono">MAX: ${max}</text>
+  `;
 }
 
-/* ADMIN: REQUEST LOGS */
+/* ADMIN: LOGS AUDIT */
 let _logsOffset = 0;
-const _logsLimit = 50;
-let _logsTotal = 0;
+const _logsLimit = 20;
+let _logsAutoTimer = null;
 let _logsById = {};
 let _logsPluginsLoaded = false;
+
+function _ensureLogsAutoRefresh() {
+  const cb = document.getElementById('logs-auto-refresh');
+  const ind = document.getElementById('logs-auto-ind');
+  if (cb && cb.checked) {
+    if (ind) ind.style.display = 'inline-block';
+    if (!_logsAutoTimer) {
+      _logsAutoTimer = setInterval(() => {
+        const pageEl = document.getElementById('page-admin-logs');
+        if (pageEl && pageEl.classList.contains('active')) {
+          loadAdminLogs(false);
+        }
+      }, 8000);
+    }
+  } else {
+    if (ind) ind.style.display = 'none';
+    if (_logsAutoTimer) {
+      clearInterval(_logsAutoTimer);
+      _logsAutoTimer = null;
+    }
+  }
+}
 
 async function loadAdminLogs(resetPage = true) {
   if (resetPage) _logsOffset = 0;
   if (!_logsPluginsLoaded && Array.isArray(S.plugins)) {
-    document.getElementById('logs-plugin').innerHTML =
-      '<option value="">All Plugins</option>' +
-      S.plugins.map(p => `<option value="${escHtml(p.name)}">${escHtml(p.display_name||p.name)}</option>`).join('');
-    _logsPluginsLoaded = true;
+    const lps = document.getElementById('logs-plugin');
+    if (lps) {
+      lps.innerHTML = '<option value="">所有插件接口 (All)</option>' +
+        S.plugins.map(p => `<option value="${escHtml(p.name)}">${escHtml(p.display_name || p.name)}</option>`).join('');
+      _logsPluginsLoaded = true;
+    }
   }
-  const search = document.getElementById('logs-search').value.trim();
-  const plugin = document.getElementById('logs-plugin').value;
-  const qs = new URLSearchParams({ search, plugin, limit: _logsLimit, offset: _logsOffset });
+
+  const search = (document.getElementById('logs-search')?.value || '').trim();
+  const plugin = document.getElementById('logs-plugin')?.value || '';
+
+  const qs = new URLSearchParams({
+    limit: _logsLimit,
+    offset: _logsOffset
+  });
+  if (search) qs.append('search', search);
+  if (plugin) qs.append('plugin', plugin);
+
   try {
-    const d = await apiFetch('/api/admin/logs?' + qs.toString());
-    _logsTotal = d.total;
-    _logsById = {};
-    d.logs.forEach(l => { _logsById[l.id] = l; });
-    _renderLogsTable(d.logs);
-    const from = d.total ? _logsOffset + 1 : 0;
-    const to = Math.min(_logsOffset + _logsLimit, d.total);
-    document.getElementById('logs-page-info').textContent = `${from}–${to} of ${d.total}`;
-    const totalPages = Math.max(1, Math.ceil(d.total / _logsLimit));
+    const res = await apiFetch(`/api/admin/logs?${qs.toString()}`);
+    _renderLogsTable(res.logs || [], res.total || 0);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function _renderLogsTable(logs, total) {
+  const tbody = document.querySelector('#admin-logs-table tbody');
+  const countEl = document.getElementById('logs-total-count');
+  const pageInfo = document.getElementById('logs-page-info');
+  const prevBtn = document.getElementById('logs-prev-btn');
+  const nextBtn = document.getElementById('logs-next-btn');
+
+  if (countEl) countEl.textContent = total;
+  _logsById = {};
+  logs.forEach(l => { _logsById[l.id] = l; });
+
+  if (pageInfo) {
     const curPage = Math.floor(_logsOffset / _logsLimit) + 1;
-    document.getElementById('logs-page-total').textContent = `/ ${totalPages} 页`;
-    const jump = document.getElementById('logs-page-jump');
-    jump.max = totalPages;
-    if (document.activeElement !== jump) jump.value = curPage;
-    document.getElementById('logs-result-badge').textContent = `${d.total} 条记录${_logsOffset===0 ? ' · 每 8 秒自动刷新' : ''}`;
-    document.getElementById('logs-prev').disabled = _logsOffset <= 0;
-    document.getElementById('logs-next').disabled = to >= d.total;
-  } catch(e) { toast(e.message, 'error'); }
-  _ensureLogsAutoRefresh();
-}
+    const maxPage = Math.ceil(total / _logsLimit) || 1;
+    pageInfo.textContent = `第 ${curPage} / ${maxPage} 页 (共 ${total} 条日志)`;
+    if (prevBtn) prevBtn.disabled = _logsOffset <= 0;
+    if (nextBtn) nextBtn.disabled = _logsOffset + _logsLimit >= total;
+  }
 
-/* 请求日志自动刷新：在该页且处于最新一页时，每 8 秒静默拉取最新（翻页/搜索输入/看详情时不打扰） */
-let _logsAutoTimer = null;
-function _ensureLogsAutoRefresh() {
-  if (_logsAutoTimer) return;
-  _logsAutoTimer = setInterval(() => {
-    const pg = document.getElementById('page-admin-logs');
-    if (!pg || !pg.classList.contains('active')) return;
-    if (_logsOffset !== 0) return;
-    if (document.activeElement === document.getElementById('logs-search')) return;
-    if (document.querySelector('.modal-overlay')) return;
-    loadAdminLogs(false);
-  }, 8000);
-}
-
-function logsPage(dir) {
-  const next = _logsOffset + dir * _logsLimit;
-  if (next < 0 || next >= _logsTotal) return;
-  _logsOffset = next;
-  loadAdminLogs(false);
-}
-
-/** 手动跳转到指定页（输入框 + Go），越界自动夹紧到 [1, 总页数] */
-function logsJump() {
-  const inp = document.getElementById('logs-page-jump');
-  const totalPages = Math.max(1, Math.ceil(_logsTotal / _logsLimit));
-  let p = parseInt(inp.value, 10);
-  if (!Number.isFinite(p)) { inp.value = Math.floor(_logsOffset / _logsLimit) + 1; return; }
-  p = Math.min(Math.max(1, p), totalPages);
-  inp.value = p;
-  _logsOffset = (p - 1) * _logsLimit;
-  loadAdminLogs(false);
-}
-
-function _renderLogsTable(logs) {
-  const tb = document.querySelector('#admin-logs-table tbody');
+  if (!tbody) return;
   if (!logs.length) {
-    tb.innerHTML = '<tr><td colspan="8" class="text-muted" style="text-align:center">No matching logs</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">未检索到匹配的请求审计日志</td></tr>';
     return;
   }
-  tb.innerHTML = logs.map(l => {
-    const params = (l.request_body || '').replace(/\s+/g, ' ').trim();
-    const preview = params.length > 64 ? params.slice(0, 64) + '…' : params;
-    const userCell = l.user_id
-      ? `${escHtml(l.username||'')}${l.user_banned ? ' <span class="tag tag-red" style="font-size:9px">banned</span>' : ''}`
-      : `<span class="text-muted" style="padding:0">${escHtml(l.username||'(anonymous)')}</span>`;
-    let actionBtn = '';
-    if (l.user_id) {
-      actionBtn = l.user_banned
-        ? `<button class="btn btn-ghost btn-sm" onclick="unbanFromLog(${l.id})">Unban</button>`
-        : `<button class="btn btn-danger btn-sm" onclick="banFromLog(${l.id})">Ban</button>`;
-    }
-    return `<tr>
-      <td style="color:var(--text3);font-family:var(--mono);font-size:11px;white-space:nowrap">${fmt(l.created_at)}</td>
-      <td style="font-size:13px">${userCell}</td>
-      <td style="color:var(--text3);font-family:var(--mono);font-size:11px">${escHtml(l.ip_address||'')}</td>
-      <td><span class="tag tag-teal">${escHtml(l.plugin||'')}</span></td>
-      <td style="color:var(--text3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(l.endpoint||'')}">${escHtml(l.endpoint||'')}</td>
+
+  tbody.innerHTML = logs.map(l => `
+    <tr>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary)">#${l.id}</td>
+      <td style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-secondary)">${fmt(l.created_at)}</td>
+      <td>
+        <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(l.username || 'GUEST')}</span>
+        ${l.user_banned ? '<span class="tag tag-red" style="font-size:10px;padding:1px 4px;margin-left:4px">BANNED</span>' : ''}
+      </td>
+      <td><span class="tag tag-teal">${escHtml(l.plugin)}</span></td>
+      <td style="font-family:var(--font-mono);font-size:11.5px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)" title="${escHtml(l.endpoint || '')}">${escHtml(l.endpoint || '—')}</td>
       <td>${statusTag(l.status_code)}</td>
-      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text2);font-family:var(--mono);font-size:11px;cursor:pointer" onclick="openLogDetail(${l.id})" title="点击查看完整内容">${escHtml(preview) || '<span class="text-muted" style="padding:0">—</span>'}</td>
-      <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="openLogDetail(${l.id})">View</button> ${actionBtn}</td>
-    </tr>`;
-  }).join('');
+      <td style="text-align:right">
+        <button class="btn btn-secondary btn-sm" onclick="openLogDetail(${l.id})">报文审计</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function logsPage(delta) {
+  _logsOffset = Math.max(0, _logsOffset + delta * _logsLimit);
+  loadAdminLogs(false);
 }
 
 function openLogDetail(id) {
   const l = _logsById[id];
   if (!l) return;
-  const preBox = 'background:rgba(42,61,62,0.05);border:1.5px solid var(--border2);border-radius:var(--r);padding:12px;font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.7;overflow:auto;max-height:240px;white-space:pre-wrap;word-break:break-word;margin:0';
-  const banZone = l.user_id
-    ? `<div style="margin-top:16px;display:flex;justify-content:flex-end">${l.user_banned
-        ? `<button class="btn btn-ghost btn-sm" onclick="unbanFromLog(${l.id});this.closest('.modal-overlay').remove()">Unban User</button>`
-        : `<button class="btn btn-danger btn-sm" onclick="banFromLog(${l.id});this.closest('.modal-overlay').remove()">封禁该用户 + IP</button>`}</div>`
-    : '';
-  const ov = document.createElement('div');
-  ov.className = 'modal-overlay';
-  ov.innerHTML = `<div class="modal" style="width:680px">
-    <div class="modal-head">
-      <div class="modal-title">Request #${l.id}</div>
-      <span class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</span>
+
+  const modal = document.getElementById('log-detail-modal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  document.getElementById('log-modal-title').innerHTML = `
+    <span>请求报文审计 // <strong>#${l.id}</strong></span>
+    <span style="font-family:var(--font-mono);font-size:12px;color:var(--cyan)">${escHtml(l.plugin)} · ${escHtml(l.endpoint || '')}</span>
+  `;
+
+  document.getElementById('log-modal-body').innerHTML = `
+    <div class="log-detail-grid">
+      <div class="log-kv-item">
+        <div class="log-kv-label">发起用户 (User)</div>
+        <div class="log-kv-val">${escHtml(l.username || '游客 / GUEST')} ${l.user_id ? `(#${l.user_id})` : ''}</div>
+      </div>
+      <div class="log-kv-item">
+        <div class="log-kv-label">客户端 IP 地址 (Client IP)</div>
+        <div class="log-kv-val" style="display:flex;align-items:center;justify-content:space-between">
+          <span>${escHtml(l.ip_address || '未知')}</span>
+        </div>
+      </div>
+      <div class="log-kv-item">
+        <div class="log-kv-label">HTTP 状态码 (Status)</div>
+        <div class="log-kv-val">${statusTag(l.status_code)}</div>
+      </div>
+      <div class="log-kv-item">
+        <div class="log-kv-label">请求时间 (Timestamp)</div>
+        <div class="log-kv-val">${fmt(l.created_at)}</div>
+      </div>
     </div>
-    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin-bottom:16px">
-      <span style="color:var(--text3)">User</span><span>${escHtml(l.username||'')} ${l.user_id?`(#${l.user_id})`:''}${l.user_banned?' · <span style="color:var(--red)">banned</span>':''}</span>
-      <span style="color:var(--text3)">IP</span><span style="font-family:var(--mono)">${escHtml(l.ip_address||'')}</span>
-      <span style="color:var(--text3)">API Key</span><span style="font-family:var(--mono)">${escHtml(l.api_key_prefix||'—')}</span>
-      <span style="color:var(--text3)">Endpoint</span><span style="font-family:var(--mono)">${escHtml(l.method||'')} ${escHtml(l.endpoint||'')}</span>
-      <span style="color:var(--text3)">Status</span><span>${statusTag(l.status_code)} · ${l.duration_ms??'?'} ms</span>
-      <span style="color:var(--text3)">Time</span><span>${fmt(l.created_at)}</span>
+
+    <!-- 用户治理快捷动作 -->
+    ${l.user_id ? `
+      <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,0.3);padding:10px 14px;border-radius:var(--radius-xs);border:1px solid var(--border-dim)">
+        <span style="font-size:12px;color:var(--text-secondary);font-family:var(--font-mono)">关联用户治理: ${escHtml(l.username)} (ID #${l.user_id})</span>
+        <div>
+          ${l.user_banned
+            ? `<button class="btn btn-secondary btn-sm" onclick="unbanFromLog(${l.id})">解除该用户封禁</button>`
+            : `<button class="btn btn-danger btn-sm" onclick="banFromLog(${l.id})">封禁此用户及其 IP</button>`}
+        </div>
+      </div>
+    ` : ''}
+
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary);margin-bottom:4px">请求载荷报文 (REQUEST PAYLOAD)</div>
+      <pre style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);max-height:180px;overflow:auto;margin:0">${escHtml(l.request_body || '[No Payload Body]')}</pre>
     </div>
-    <div class="card-title" style="margin-bottom:6px">Request Params</div>
-    <pre style="${preBox}">${escHtml(l.request_body||'(empty)')}</pre>
-    <div class="card-title" style="margin:14px 0 6px">Response</div>
-    <pre style="${preBox}">${escHtml(l.response_body||'(empty)')}</pre>
-    ${banZone}
-  </div>`;
-  ov.addEventListener('click', e => { if (e.target===ov) ov.remove(); });
-  document.body.appendChild(ov);
+
+    <div>
+      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary);margin-bottom:4px">响应数据摘要 (RESPONSE SUMMARY)</div>
+      <pre style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);max-height:180px;overflow:auto;margin:0">${escHtml(l.response_body || '[No Response Body Logged]')}</pre>
+    </div>
+  `;
+}
+
+function closeLogDetailModal() {
+  const modal = document.getElementById('log-detail-modal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function banFromLog(id) {
   const l = _logsById[id];
   if (!l || !l.user_id) return;
-  if (!confirm(`确认封禁用户「${l.username}」？\n将封禁其 IP（${l.ip_address} 及其历史 IP）并把其所有接口配额上限设为 0。`)) return;
+  if (!confirm(`确认封禁用户【${l.username}】？\n将封禁该 IP（${l.ip_address}）及历史关联 IP，并把该用户所有接口配额清零。`)) return;
   try {
     const r = await apiFetch(`/api/admin/users/${l.user_id}/ban`, {
-      method:'POST', body: JSON.stringify({ reason: 'banned from request logs', ip: l.ip_address })
+      method: 'POST',
+      body: JSON.stringify({ reason: 'banned from request logs', ip: l.ip_address })
     });
-    toast(`已封禁 ${l.username}：${(r.banned_ips||[]).length} 个 IP，${(r.zeroed_plugins||[]).length} 个接口配额归零`);
+    toast(`已封禁 ${l.username}：${(r.banned_ips || []).length} 个 IP，${(r.zeroed_plugins || []).length} 个接口配额归零`);
+    closeLogDetailModal();
     loadAdminLogs(false);
-  } catch(e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 async function unbanFromLog(id) {
   const l = _logsById[id];
   if (!l || !l.user_id) return;
-  if (!confirm(`解封用户「${l.username}」？将解除其 IP 封禁并把接口配额上限还原为默认值。`)) return;
+  if (!confirm(`解封用户【${l.username}】？将释放关联 IP 封禁，并将各接口配额还原为系统默认值。`)) return;
   try {
-    await apiFetch(`/api/admin/users/${l.user_id}/unban`, { method:'POST' });
-    toast(`已解封 ${l.username}`);
+    await apiFetch(`/api/admin/users/${l.user_id}/unban`, { method: 'POST' });
+    toast(`已成功解封用户 ${l.username}`);
+    closeLogDetailModal();
     loadAdminLogs(false);
-  } catch(e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
-
 async function purgeLogsPrompt() {
-  const daysStr = prompt('请输入要保留的天数（早于该天数的日志将被永久删除）：', '3');
+  const daysStr = prompt('请输入要保留的天数（早于该天数的请求日志将被彻底清除以释放存储）：', '3');
   if (daysStr === null) return;
   const days = parseInt(daysStr, 10);
   if (isNaN(days) || days < 0) {
     alert('请输入有效的非负整数天数');
     return;
   }
-  const msg = '确认清理 ' + days + ' 天前的所有日志？此操作不可逆。';
-  if (!confirm(msg)) return;
+  if (!confirm(`确认永久清理 ${days} 天前的历史审计日志？此操作无法撤销。`)) return;
   try {
     const res = await apiFetch('/api/admin/logs/purge', {
       method: 'POST',
-      body: JSON.stringify({ days: days })
+      body: JSON.stringify({ days })
     });
-    toast('清理完成：删除 ' + res.purged_access_logs + ' 条访问日志、' + res.purged_request_logs + ' 条请求日志');
+    toast(`日志清理完毕：已释放 ${res.purged_access_logs || 0} 条历史记录`);
     loadAdminLogs(true);
-  } catch(e) {
+  } catch (e) {
     toast(e.message, 'error');
   }
 }

@@ -2,307 +2,530 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Apollodorus · API Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Apollodorus · 统一 AI 微服务网关平台</title>
+  <!-- Google Fonts: Plus Jakarta Sans + JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Noto+Sans+SC:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;600&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
-
 </head>
 <body>
 
-<!-- background image + legibility veil -->
-<div class="bg-wallpaper"></div>
-<div class="bg-veil"></div>
+  <!-- 顶部主导航栏 -->
+  <header class="nav-bar">
+    <div class="nav-brand" onclick="goPage('home')">
+      <div class="nav-brand-logo">
+        <span class="pulse-dot"></span>
+      </div>
+      <div>
+        <div class="nav-brand-text">APOLLODORUS</div>
+        <div class="nav-brand-sub">AI API GATEWAY · 极简微服务网关</div>
+      </div>
+    </div>
 
-<!-- background orbs -->
-<div class="orb orb-1"></div>
-<div class="orb orb-2"></div>
-<div class="orb orb-3"></div>
+    <!-- 导航链接槽位 (由 app.js 动态渲染) -->
+    <nav class="nav-links" id="nav-links"></nav>
 
-<!-- top pill nav -->
-<nav class="nav">
-  <div class="nav-header">
-    <span class="nav-brand" onclick="goPage('home')">Apollodorus</span>
-    <button class="nav-toggle" onclick="document.getElementById('navMenu').classList.toggle('is-open')" aria-label="menu">☰</button>
-  </div>
-  <div class="nav-menu" id="navMenu">
-    <div class="nav-links" id="nav-links"></div>
+    <!-- 鉴权控制槽位 (由 app.js 动态渲染) -->
     <div class="nav-auth" id="nav-auth"></div>
+  </header>
+
+  <!-- 管理员子导航栏 (在 admin-* 页面自动滑出) -->
+  <div class="subnav" id="admin-subnav" style="display:none">
+    <span class="subnav-label">管理终端 ADMIN CONSOLE:</span>
+    <span class="pill" data-page="admin-users" onclick="goPage('admin-users')">用户与配额治理</span>
+    <span class="pill" data-page="admin-invites" onclick="goPage('admin-invites')">通行邀请码签发</span>
+    <span class="pill" data-page="admin-stats" onclick="goPage('admin-stats')">全局运行遥测看板</span>
+    <span class="pill" data-page="admin-logs" onclick="goPage('admin-logs')">请求审计流日志</span>
   </div>
-</nav>
 
-<!-- APP -->
-<div id="app">
-  <main id="main" class="page-wrapper">
+  <!-- 主视图容器 -->
+  <main class="main-wrap">
 
-    <!-- HOME · public landing + interface hub -->
+    <!-- ==================== PAGE: HOME ==================== -->
     <div class="page active" id="page-home">
-      <div class="hero" id="home-hero">
-        <div class="header-badge">Unified AI API Gateway</div>
-        <h1>Apollodorus<br><em>一处接入 · 万象皆通</em></h1>
-        <p>哼哼啊啊啊啊啊啊 · 统一密钥 · 按接口独立配额</p>
-      </div>
-      <div class="cta-banner" id="home-cta">
-        <div class="cta-text">登录后即可<b>创建 API Key</b> 并开始调用下列接口。游客可浏览接口说明与示例代码。</div>
-        <button class="btn btn-primary" onclick="goPage('auth')">登录 / 注册</button>
-      </div>
-      <div class="section-label">可用接口 · Interfaces</div>
-      <div class="hub-grid" id="home-hub"><div class="text-muted">加载中…</div></div>
-      <div class="watermark">Apollodorus · Unified API Gateway · 接口由后端插件目录自动发现生成</div>
-    </div>
+      <!-- 英雄横幅展示区 -->
+      <section class="hero-box">
+        <div class="hero-badge">
+          <span class="pulse-dot"></span>
+          <span>✦ 统一人工智能网关 · UNIFIED AI API GATEWAY</span>
+        </div>
+        <h1 class="hero-title">
+          一处接入 · <strong>万象皆通</strong>
+        </h1>
+        <p class="hero-desc">
+          面向开发者的现代化 AI 微服务接入平台。统一密钥调度、多模型微服务自动发现、独立细粒度配额治理与全链路请求审计。即插即用，全面兼容主流协议。
+        </p>
 
-    <!-- AUTH · login / register -->
-    <div class="page" id="page-auth">
-      <div class="hero"><div class="header-badge">Sign In</div><h1>欢迎回来，<em>开发者</em></h1><p>登录后获取 API Key、查看用量与配额</p></div>
-      <div class="card" style="max-width:440px;margin:0 auto">
-        <div class="auth-tabs">
-          <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">登录</div>
-          <div class="auth-tab" id="tab-register" onclick="switchTab('register')">注册</div>
-        </div>
-        <div id="login-form">
-          <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="login-user" placeholder="username" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" /></div>
-          <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" /></div>
-          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:4px" onclick="doLogin()">登录</button>
-          <div class="auth-error" id="login-err"></div>
-        </div>
-        <div id="register-form" style="display:none">
-          <div class="form-group"><label class="form-label">Username</label><input class="form-input" id="reg-user" placeholder="username" /></div>
-          <div class="form-group"><label class="form-label">Password</label><input class="form-input" type="password" id="reg-pass" placeholder="••••••••" /></div>
-          <div class="form-group">
-            <label class="form-label">Invite Code</label>
-            <input class="form-input" id="reg-invite" placeholder="xxxx-xxxx-xxxx" />
-            <div class="invite-hint">
-  🔮 需要邀请码？请加入项目 <a href="https://qm.qq.com/q/Rc0YzSjcsw" target="_blank" rel="noopener noreferrer">QQ 群</a> 获取。
-</div>
+        <!-- 特性芯片条 -->
+        <div class="telemetry-bar">
+          <div class="telemetry-item">
+            <span class="telemetry-dot" style="background:var(--sage-primary)"></span>
+            <span>协议支持: <strong>RESTful / OpenAI v1</strong></span>
           </div>
-          <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px" onclick="doRegister()">创建账号</button>
-          <div class="auth-error" id="reg-err"></div>
+          <div class="telemetry-item">
+            <span class="telemetry-dot" style="background:var(--sky-primary)"></span>
+            <span>鉴权模式: <strong>Bearer Token / API Key</strong></span>
+          </div>
+          <div class="telemetry-item">
+            <span class="telemetry-dot" style="background:var(--camel-primary)"></span>
+            <span>治理能力: <strong>RPM 限流 + 细粒度用户配额</strong></span>
+          </div>
+          <div class="telemetry-item">
+            <span class="telemetry-dot" style="background:var(--rose-primary)"></span>
+            <span>安全审计: <strong>全链路流水毫秒级监控</strong></span>
+          </div>
+        </div>
+
+        <!-- 快捷操作区 (未登录时显示) -->
+        <div id="home-cta" style="margin-top:24px;display:flex;gap:12px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="switchTab('register'); goPage('auth');">
+            <span>立即开通接入通行证</span>
+            <span style="font-family:var(--font-mono)">→</span>
+          </button>
+          <button class="btn btn-secondary" onclick="goPage('auth')">
+            <span>登录现有账号凭据</span>
+          </button>
+        </div>
+
+        <!-- 检索与分类筛选组合区 -->
+        <div class="hub-filter-bar">
+          <div class="cat-chips" id="hub-cat-chips">
+            <button class="cat-chip active" onclick="setHubCategory('all', this)">全部接口</button>
+            <button class="cat-chip" onclick="setHubCategory('llm', this)">大模型对话</button>
+            <button class="cat-chip" onclick="setHubCategory('vision', this)">图像生成</button>
+            <button class="cat-chip" onclick="setHubCategory('audio', this)">语音合成</button>
+            <button class="cat-chip" onclick="setHubCategory('translate', this)">语言服务</button>
+          </div>
+
+          <div class="search-input-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="hub-search" placeholder="搜索接口名称、模型路由、功能描述..." oninput="filterHubCards(this.value)" />
+            <button class="search-clear-btn" onclick="clearHubSearch()" title="清空搜索">✕</button>
+            <span class="search-count-pill" id="hub-match-count">已就绪</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 接口卡片矩阵 (由 /api/plugins 自动生成) -->
+      <section style="margin-top:36px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+          <div>
+            <h2 style="font-size:20px;font-weight:700;letter-spacing:-0.01em;color:var(--mocha-dark)">已注册微服务接口 (DISCOVERED PLUGINS)</h2>
+            <p style="font-size:13px;color:var(--text-tertiary);margin-top:2px">后端自动发现引擎挂载并实时启用的微服务模块</p>
+          </div>
+        </div>
+        <div class="hub-grid" id="home-hub">
+          <div class="text-muted" style="grid-column:1/-1;text-align:center;padding:48px 0;font-family:var(--font-mono)">
+            正在同步微服务节点清单...
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ==================== PAGE: AUTH ==================== -->
+    <div class="page" id="page-auth">
+      <div class="auth-wrap">
+        <div class="auth-card">
+          <div style="text-align:center;margin-bottom:24px">
+            <div style="display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--mocha-primary);margin-bottom:6px">
+              <span class="pulse-dot"></span>
+              <span>SECURITY ACCESS TERMINAL</span>
+            </div>
+            <h2 style="font-size:22px;font-weight:700;letter-spacing:-0.02em;color:var(--mocha-dark)">网关身份认证通行凭证</h2>
+            <p style="font-size:13px;color:var(--text-secondary);margin-top:4px">登录您的开发者账号以分配独立配额与在线调试接口</p>
+          </div>
+
+          <!-- 选项卡切换 -->
+          <div class="auth-tabs">
+            <div class="auth-tab active" id="tab-login" onclick="switchTab('login')">已有账号登录</div>
+            <div class="auth-tab" id="tab-register" onclick="switchTab('register')">新开发者注册</div>
+          </div>
+
+          <!-- 登录表单 -->
+          <div id="login-form">
+            <div class="form-group">
+              <label class="form-label">用户名</label>
+              <input type="text" id="login-user" class="form-input" placeholder="输入您的开发者用户名" autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">登录密码</label>
+              <input type="password" id="login-pass" class="form-input" placeholder="••••••••" autocomplete="current-password" />
+            </div>
+            <div id="login-err" class="form-error"></div>
+            <button class="btn btn-primary" style="width:100%;margin-top:12px;padding:12px" onclick="doLogin()">
+              <span>验证凭证并登录</span>
+              <span style="font-family:var(--font-mono)">→</span>
+            </button>
+          </div>
+
+          <!-- 注册表单 -->
+          <div id="register-form" style="display:none">
+            <div class="form-group">
+              <label class="form-label">用户名</label>
+              <input type="text" id="reg-user" class="form-input" placeholder="设置您的开发者标识" autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">登录密码</label>
+              <input type="password" id="reg-pass" class="form-input" placeholder="••••••••" autocomplete="new-password" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">通行邀请码</label>
+              <input type="text" id="reg-invite" class="form-input" placeholder="输入系统管理员签发的有效邀请码" style="font-family:var(--font-mono)" />
+              <div class="invite-hint" style="margin-top:8px;font-size:12px;color:var(--text-tertiary)">
+                💡 需要邀请码？请加入项目交流群获取。
+              </div>
+            </div>
+            <div id="reg-err" class="form-error"></div>
+            <button class="btn btn-primary" style="width:100%;margin-top:12px;padding:12px" onclick="doRegister()">
+              <span>激活凭据并注册</span>
+              <span style="font-family:var(--font-mono)">→</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- admin sub-nav (shown only on admin pages) -->
-    <div class="subnav" id="admin-subnav">
-      <div class="pill" data-page="admin-users" onclick="goPage('admin-users')">用户</div>
-      <div class="pill" data-page="admin-logs" onclick="goPage('admin-logs')">请求日志</div>
-      <div class="pill" data-page="admin-invites" onclick="goPage('admin-invites')">邀请码</div>
-      <div class="pill" data-page="admin-stats" onclick="goPage('admin-stats')">统计</div>
-    </div>
+    <!-- ==================== PAGE: DASHBOARD ==================== -->
+    <div class="page" id="page-dashboard">
+      <div style="margin-bottom:28px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">开发者控制台</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">实时配额水位监控、今日请求量统计与最近请求审计流</p>
+      </div>
 
+      <!-- 统计指标网格 -->
+      <div class="stat-grid" id="dash-stat-grid" style="margin-bottom:24px"></div>
 
-    <!-- DASHBOARD -->
-    <div class="page active" id="page-dashboard">
-      <div class="page-header"><h1>Dashboard</h1><p>Gateway overview and recent activity</p></div>
-      <div class="stats-grid" id="dash-stats"></div>
-      <div class="grid-2">
-        <div class="card"><div class="card-title">Quota Status</div><div id="dash-quota"></div></div>
-        <div class="card">
-          <div class="card-title">Recent Requests</div>
-          <table class="data-table" id="dash-recent">
-            <thead><tr><th>Plugin</th><th>Endpoint</th><th>Status</th><th>Time</th></tr></thead>
+      <!-- 配额水位仪表 -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">接口配额实时水位监测</span>
+          <span style="font-size:11.5px;color:var(--text-tertiary);font-family:var(--font-mono)">STATUS / USAGE RATIO</span>
+        </div>
+        <div style="padding:20px">
+          <div class="quota-grid" id="dash-quota"></div>
+        </div>
+      </div>
+
+      <!-- 最近访问流表 -->
+      <div class="card" id="dash-recent" style="margin-top:24px">
+        <div class="card-head">
+          <span class="card-title">最近访问流审计 (RECENT ACCESS STREAM)</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadDashboard()">刷新数据</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>目标微服务</th>
+                <th>请求端点</th>
+                <th>响应状态</th>
+                <th>调用时间</th>
+              </tr>
+            </thead>
             <tbody></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- MY USAGE -->
-    <div class="page" id="page-usage">
-      <div class="page-header"><h1>My Usage</h1><p>Call history and quota breakdown</p></div>
-      <div class="card mb-24"><div class="card-title">Quota Breakdown</div><div id="usage-quota"></div></div>
-      <div class="card">
-        <div class="card-title">Request History</div>
-        <table class="data-table" id="usage-logs">
-          <thead><tr><th>#</th><th>Plugin</th><th>Endpoint</th><th>Status</th><th>Time</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- API KEYS -->
+    <!-- ==================== PAGE: APIKEYS ==================== -->
     <div class="page" id="page-apikeys">
-      <div class="page-header"><h1>API Keys</h1><p>OpenAI-compatible Bearer token authentication</p></div>
-      <div class="card mb-24" style="border-color:rgba(154,212,214,0.35)">
-        <div class="card-title">Usage</div>
-        <div style="font-size:13.5px;color:var(--text2);line-height:1.9;margin-bottom:12px">Use your API key as the Bearer token and point <code>base_url</code> to this gateway:</div>
-        <div style="font-family:var(--mono);font-size:12px;color:var(--text2);background:rgba(42,61,62,0.05);padding:14px 16px;border-radius:var(--r);border:1.5px solid var(--border);line-height:2.2">
-          <span style="color:var(--text3)"># Python / openai SDK</span><br>
-          client = OpenAI(<br>
-          &nbsp;&nbsp;base_url=<span style="color:var(--accent3)">"http://api.apollodorus.xyz/v1"</span>,<br>
-          &nbsp;&nbsp;api_key=<span style="color:var(--accent3)">"sk-xxxxxxxxxxxx"</span><br>
-          )
-        </div>
-        <div style="font-size:13.5px;color:var(--text2);line-height:1.9;margin-bottom:12px">所有模型都可以通过 <code>v1接口调用</code> 不同上游提供的模型配额独立</div>
+      <div style="margin-bottom:28px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">API 密钥凭证治理</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">生成用于客户端接入与生产环境调用的长期 API 访问密钥</p>
       </div>
-      <div class="card mb-24">
-        <div class="card-title">Create New Key</div>
-        <div id="new-key-reveal" style="display:none"></div>
-        <div class="flex gap-10">
-          <input class="form-input" id="new-key-name" placeholder="Key name (e.g. my-app, prod)" style="flex:1" />
-          <button class="btn btn-primary" onclick="createApiKey()">Generate</button>
+
+      <!-- 创建密钥栏 -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">生成新凭据 (GENERATE ACCESS KEY)</span>
+        </div>
+        <div style="padding:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <input type="text" id="new-key-name" class="form-input" placeholder="输入密钥用途别名 (例如: Production Backend, Bot, Mobile App)" style="flex:1;min-width:260px" />
+          <button class="btn btn-primary" onclick="createApiKey()">
+            <span>立即创建密钥</span>
+            <span style="font-family:var(--font-mono)">+</span>
+          </button>
         </div>
       </div>
-      <div class="card"><div class="card-title">Your Keys</div><div id="key-list"><div class="text-muted">Loading…</div></div></div>
+
+      <!-- 一次性密钥显示槽位 -->
+      <div id="new-key-reveal" style="display:none;margin-top:20px;margin-bottom:24px"></div>
+
+      <!-- 密钥列表 -->
+      <div class="card" style="margin-top:24px">
+        <div class="card-head">
+          <span class="card-title">活跃密钥凭证清单 (ACTIVE KEYS)</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadApiKeys()">刷新列表</button>
+        </div>
+        <div style="padding:20px">
+          <div class="key-list" id="key-list"></div>
+        </div>
+      </div>
     </div>
 
-    <!-- ADMIN: USERS -->
+    <!-- ==================== PAGE: USAGE ==================== -->
+    <div class="page" id="page-usage">
+      <div style="margin-bottom:28px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">用量与审计流水</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">查看您的微服务调用用量明细与完整请求流水记录</p>
+      </div>
+
+      <!-- 详细配额表 -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">各微服务配额详表</span>
+        </div>
+        <div style="padding:20px">
+          <div class="quota-grid" id="usage-quota"></div>
+        </div>
+      </div>
+
+      <!-- 完整流水表 -->
+      <div class="card" id="usage-logs" style="margin-top:24px">
+        <div class="card-head">
+          <span class="card-title">历史调用流水日志 (AUDIT LOGS)</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadUsage()">刷新日志</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>流水编号</th>
+                <th>服务模块</th>
+                <th>请求端点</th>
+                <th>状态码</th>
+                <th>请求时间</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: ADMIN USERS ==================== -->
     <div class="page" id="page-admin-users">
-      <div class="page-header"><h1>User Management</h1><p>Manage users, quotas, and roles</p></div>
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">全局用户与配额治理</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">检索用户账户、批量调整接口上限配额、重置计数与风险账户封禁</p>
+      </div>
 
-      <!-- Batch Toolbar -->
-      <div class="card mb-24" id="batch-toolbar" style="display:none">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap">
-            Batch — <span id="batch-count" style="color:var(--accent3)">0</span> selected
-          </span>
-          <div style="flex:1;min-width:160px">
-            <select class="form-input" id="batch-plugin" style="padding:7px 11px;font-size:12px" onchange="onBatchPluginChange()">
-              <option value="">— Select Plugin —</option>
-            </select>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            <input type="number" id="batch-limit-val" class="form-input" placeholder="limit (∞=blank)"
-              style="width:130px;padding:7px 11px;font-size:12px" min="0" />
-            <button class="btn btn-ghost btn-sm" onclick="batchSetLimit()">Set Limit</button>
-            <button class="btn btn-ghost btn-sm" onclick="batchResetUsed()">Reset Used</button>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="clearBatchSelection()" style="margin-left:auto">✕ Deselect All</button>
+      <!-- 批量操作悬浮条 -->
+      <div class="batch-bar" id="batch-toolbar" style="display:none">
+        <div class="batch-info">
+          <span>⚡ 已勾选 <strong id="batch-selected-count" style="color:var(--mocha-primary)">0</strong> 名用户</span>
+        </div>
+        <div class="batch-actions">
+          <select id="batch-plugin" class="form-input" style="width:190px;font-size:12px;padding:6px 10px" onchange="onBatchPluginChange()"></select>
+          <span id="batch-quota-hint" style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary)"></span>
+          <input type="number" id="batch-limit-val" placeholder="上限 (留空为无限)" class="form-input" style="width:140px;font-size:12px;padding:6px 10px" />
+          <button class="btn btn-primary btn-sm" onclick="batchSetLimit()">批量修改上限</button>
+          <button class="btn btn-danger btn-sm" onclick="batchResetUsed()">批量已用归零</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearBatchSelection()">取消勾选</button>
         </div>
       </div>
 
-      <!-- Filter Bar -->
-      <div class="card mb-24">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap;flex-shrink:0">Filter</span>
-          <select class="form-input" id="filter-plugin" style="flex:1;min-width:140px;padding:7px 11px;font-size:12px">
-            <option value="">All Plugins</option>
+      <!-- 检索与筛选栏 -->
+      <div class="card" style="margin-bottom:20px">
+        <div style="padding:16px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <input type="text" id="search-user" class="form-input" placeholder="搜索用户名或 UID..." style="width:200px" onkeydown="if(event.key==='Enter')applyFilter()" />
+          <select id="filter-plugin" class="form-input" style="width:200px" onchange="applyFilter()"></select>
+          <select id="filter-state" class="form-input" style="width:170px" onchange="applyFilter()">
+            <option value="all">所有使用状态 (All)</option>
+            <option value="warn">预警状态 (≥80%)</option>
+            <option value="exhausted">已耗尽 (100%)</option>
           </select>
-          <select class="form-input" id="filter-op" style="width:140px;padding:7px 11px;font-size:12px">
-            <option value="">— Condition —</option>
-            <option value="remaining_lt">Remaining &lt;</option>
-            <option value="remaining_lte">Remaining ≤</option>
-            <option value="used_gt">Used &gt;</option>
-            <option value="pct_gt">Used % &gt;</option>
-            <option value="exhausted">Exhausted</option>
-            <option value="unlimited">Unlimited</option>
-          </select>
-          <input type="number" id="filter-val" class="form-input" placeholder="value"
-            style="width:100px;padding:7px 11px;font-size:12px" min="0" />
-          <button class="btn btn-primary btn-sm" onclick="applyFilter()">Apply</button>
-          <button class="btn btn-ghost btn-sm" onclick="clearFilter()">Clear</button>
-          <span id="filter-result-badge" style="display:none;font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap"></span>
+          <button class="btn btn-secondary btn-sm" onclick="applyFilter()">执行筛选</button>
+          <button class="btn btn-secondary btn-sm" onclick="clearFilter()">重置条件</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto" onclick="loadAdminUsers()">刷新数据</button>
         </div>
       </div>
 
-      <!-- User Table -->
+      <!-- 用户列表表格 -->
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-          <div style="display:flex;align-items:center;gap:10px">
-            <input type="checkbox" id="select-all-cb" style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)" onchange="toggleSelectAll(this.checked)" title="Select all visible" />
-            <span style="font-family:var(--mono);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text3)">Select All</span>
-          </div>
+        <div class="table-wrap">
+          <table class="data-table" id="admin-users-table">
+            <thead>
+              <tr>
+                <th style="width:40px;text-align:center">
+                  <input type="checkbox" id="select-all-users" onchange="toggleSelectAll(this.checked)" style="accent-color:var(--mocha-primary);cursor:pointer" />
+                </th>
+                <th>UID</th>
+                <th>用户标识</th>
+                <th>角色 / 状态</th>
+                <th>接口配额摘要</th>
+                <th style="text-align:right">操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
-        <table class="data-table" id="admin-users-table">
-          <thead>
-            <tr>
-              <th style="width:32px"></th>
-              <th>User</th>
-              <th>Role</th>
-              <th>Registered</th>
-              <th>Plugins</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
       </div>
     </div>
 
-    <!-- ADMIN: INVITES -->
+    <!-- ==================== PAGE: ADMIN INVITES ==================== -->
     <div class="page" id="page-admin-invites">
-      <div class="page-header"><h1>Invite Codes</h1><p>Generate and manage registration codes</p></div>
-      <div class="card mb-24">
-        <div class="flex-between mb-20">
-          <div class="card-title" style="margin:0">Generate Codes</div>
-          <div class="flex gap-10">
-            <input type="number" class="form-input" id="invite-count" value="1" min="1" max="50" style="width:70px;padding:8px 10px" />
-            <button class="btn btn-primary btn-sm" onclick="generateInvites()">Generate</button>
-          </div>
-        </div>
-        <div id="invite-list" class="code-grid"></div>
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">通行邀请码签发</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">生成并管理新开发者接入通行所需的注册邀请码</p>
       </div>
-    </div>
 
-    <!-- ADMIN: STATS -->
-    <div class="page" id="page-admin-stats">
-      <div class="page-header"><h1>Global Statistics</h1><p>System-wide analytics and trends</p></div>
-      <div class="stats-grid" id="admin-stat-cards"></div>
-      <div class="card mb-24">
-        <div class="card-title">Daily Volume — Last 30 Days</div>
-        <div class="chart-wrap">
-          <svg id="line-svg" viewBox="0 0 800 160" preserveAspectRatio="none"></svg>
+      <!-- 生成卡片 -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-head">
+          <span class="card-title">批量签发邀请凭据</span>
         </div>
-      </div>
-      <div class="grid-2">
-        <div class="card"><div class="card-title">By Plugin</div><div id="stats-by-plugin"></div></div>
-        <div class="card"><div class="card-title">Top Users</div><div id="stats-by-user"></div></div>
-      </div>
-    </div>
-
-    <!-- ADMIN: REQUEST LOGS -->
-    <div class="page" id="page-admin-logs">
-      <div class="page-header"><h1>Request Logs</h1><p>每个网关 API 调用的发起用户、IP、接口、参数与返回结果</p></div>
-      <div class="card mb-24">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <span style="font-family:var(--mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap;flex-shrink:0">Search</span>
-          <input class="form-input" id="logs-search" placeholder="关键字搜索请求内容；或用 user: 用户名 / ip: 地址 精确筛选…"
-            style="flex:1;min-width:220px;padding:7px 11px;font-size:13px"
-            onkeydown="if(event.key==='Enter')loadAdminLogs()" />
-          <select class="form-input" id="logs-plugin" style="width:160px;padding:7px 11px;font-size:12px">
-            <option value="">All Plugins</option>
+        <div style="padding:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <span style="font-size:13px;color:var(--text-secondary)">生成数量:</span>
+          <select id="invite-count" class="form-input" style="width:120px">
+            <option value="1">1 个邀请码</option>
+            <option value="5">5 个邀请码</option>
+            <option value="10">10 个邀请码</option>
+            <option value="20">20 个邀请码</option>
           </select>
-          <button class="btn btn-primary btn-sm" onclick="loadAdminLogs()">Search</button>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('logs-search').value='';document.getElementById('logs-plugin').value='';loadAdminLogs()">Clear</button>
-          <button class="btn btn-danger btn-sm" onclick="purgeLogsPrompt()" title="清理超期审计日志" style="margin-left:auto">清理日志</button>
-          <span id="logs-result-badge" style="font-family:var(--mono);font-size:10px;color:var(--text3);white-space:nowrap"></span>
+          <button class="btn btn-primary" onclick="generateInvites()">
+            <span>立即签发</span>
+            <span style="font-family:var(--font-mono)">+</span>
+          </button>
         </div>
       </div>
+
+      <!-- 邀请码列表 -->
       <div class="card">
-        <table class="data-table" id="admin-logs-table">
-          <thead>
-            <tr>
-              <th>Time</th><th>User</th><th>IP</th><th>Plugin</th><th>Endpoint</th>
-              <th>Status</th><th>Params</th><th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:10px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" id="logs-prev" onclick="logsPage(-1)">← Prev</button>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span id="logs-page-info" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
-            <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">跳至</span>
-            <input class="form-input" id="logs-page-jump" type="number" min="1"
-              style="width:60px;padding:5px 8px;font-size:12px;text-align:center"
-              onkeydown="if(event.key==='Enter')logsJump()" />
-            <span id="logs-page-total" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
-            <button class="btn btn-ghost btn-sm" onclick="logsJump()">Go</button>
-          </div>
-          <button class="btn btn-ghost btn-sm" id="logs-next" onclick="logsPage(1)">Next →</button>
+        <div class="card-head">
+          <span class="card-title">有效通行邀请码清单</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadAdminInvites()">刷新列表</button>
+        </div>
+        <div style="padding:20px">
+          <div class="invite-grid" id="invite-list"></div>
         </div>
       </div>
     </div>
+
+    <!-- ==================== PAGE: ADMIN STATS ==================== -->
+    <div class="page" id="page-admin-stats">
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">全局运行遥测看板</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">全系统总请求计数、各微服务调用占比与近 24 小时流量走势</p>
+      </div>
+
+      <!-- 统计指标卡 -->
+      <div class="stat-grid" id="admin-stat-cards" style="margin-bottom:24px"></div>
+
+      <!-- 趋势图表卡片 -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">24 小时全网关请求趋势走势 (TRAFFIC SURGE)</span>
+          <span style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-tertiary)">REALTIME AUDIT FLOW</span>
+        </div>
+        <div style="padding:24px 20px">
+          <div class="chart-wrap">
+            <svg id="line-svg" viewBox="0 0 800 160" preserveAspectRatio="none" style="width:100%;height:160px;overflow:visible"></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: ADMIN LOGS ==================== -->
+    <div class="page" id="page-admin-logs">
+      <div style="margin-bottom:24px">
+        <h1 style="font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px;color:var(--mocha-dark)">全局请求审计流日志</h1>
+        <p style="color:var(--text-secondary);font-size:13.5px">对所有客户端请求报文、调用者、客户端 IP 与响应状态进行实时审计</p>
+      </div>
+
+      <!-- 检索与控制工具栏 -->
+      <div class="card" style="margin-bottom:20px">
+        <div style="padding:16px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <input type="text" id="logs-search" class="form-input" placeholder="全局检索 (支持 user:用户名, ip:地址, 关键词)..." style="flex:1;min-width:240px" onkeydown="if(event.key==='Enter')loadAdminLogs(true)" />
+          <select id="logs-plugin" class="form-input" style="width:180px" onchange="loadAdminLogs(true)"></select>
+          <button class="btn btn-secondary btn-sm" onclick="loadAdminLogs(true)">执行检索</button>
+          
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-secondary);cursor:pointer;margin-left:8px">
+            <input type="checkbox" id="logs-auto-refresh" onchange="_ensureLogsAutoRefresh()" style="accent-color:var(--mocha-primary)" />
+            <span>自动刷新 (8s)</span>
+            <span id="logs-auto-ind" class="pulse-dot" style="display:none;width:6px;height:6px"></span>
+          </label>
+
+          <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="purgeLogsPrompt()">清理历史日志</button>
+        </div>
+      </div>
+
+      <!-- 审计日志表格 -->
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table" id="admin-logs-table">
+            <thead>
+              <tr>
+                <th>流水号</th>
+                <th>请求时间</th>
+                <th>发起者</th>
+                <th>目标微服务</th>
+                <th>请求端点</th>
+                <th>状态</th>
+                <th style="text-align:right">报文审计</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- 分页控制栏 -->
+        <div style="padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--border-dim);background:var(--bg-subtle)">
+          <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)">
+            <span id="logs-page-info">正在载入日志...</span>
+            <span id="logs-total-count" style="margin-left:8px;color:var(--text-tertiary)"></span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" id="logs-prev-btn" onclick="logsPage(-1)" disabled>上一页</button>
+            <button class="btn btn-secondary btn-sm" id="logs-next-btn" onclick="logsPage(1)" disabled>下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 动态微服务详情页面挂载容器 (由 plugins.js 动态填充) -->
+    <div id="plugin-pages-container"></div>
 
   </main>
-</div>
-<script src="/static/js/core.js"></script>
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/app.js"></script>
-<script src="/static/js/plugins.js"></script>
-<script src="/static/js/console.js"></script>
-<script src="/static/js/admin.js"></script>
-<script src="/static/js/boot.js"></script>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 用户配额治理模态框 -->
+  <div class="modal-overlay" id="user-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-head">
+        <div class="modal-title" id="modal-user-title">用户配额控制</div>
+        <div class="modal-close" onclick="closeUserModal()">✕</div>
+      </div>
+      <div style="padding:20px;max-height:65vh;overflow-y:auto">
+        <div id="modal-quota-rows"></div>
+        <div id="modal-ban-zone" style="margin-top:20px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 请求报文审计详情模态框 -->
+  <div class="modal-overlay" id="log-detail-modal" style="display:none">
+    <div class="modal" style="max-width:760px">
+      <div class="modal-head">
+        <div class="modal-title" id="log-modal-title">请求报文审计</div>
+        <div class="modal-close" onclick="closeLogDetailModal()">✕</div>
+      </div>
+      <div id="log-modal-body" style="padding:20px;max-height:70vh;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <!-- 脚本加载顺序 (完全共享作用域) -->
+  <script src="/static/js/core.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/console.js"></script>
+  <script src="/static/js/plugins.js"></script>
+  <script src="/static/js/admin.js"></script>
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/boot.js"></script>
+
 </body>
 </html>
