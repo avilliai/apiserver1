@@ -24,9 +24,21 @@ async function initApp() {
     S.userKeys = [];
   }
 
-  buildPluginPages();
-  renderHomeHub();
-  renderNav();
+  try {
+    buildPluginPages();
+  } catch (e) {
+    console.error('buildPluginPages failed:', e);
+  }
+  try {
+    renderHomeHub();
+  } catch (e) {
+    console.error('renderHomeHub failed:', e);
+  }
+  try {
+    renderNav();
+  } catch (e) {
+    console.error('renderNav failed:', e);
+  }
 
   const loggedIn = !!(S.token && S.user);
   const cta = document.getElementById('home-cta');

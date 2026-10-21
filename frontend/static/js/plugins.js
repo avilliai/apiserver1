@@ -108,13 +108,22 @@ function renderHomeHub() {
 function buildPluginPages() {
   document.querySelectorAll('.plugin-generated-page').forEach(el => el.remove());
 
-  const container = document.getElementById('plugin-pages-container') || document.body;
+  const container = document.getElementById('plugin-pages-container') ||
+                    document.getElementById('main') ||
+                    document.querySelector('main') ||
+                    document.body;
+  if (!container) return;
+
   S.plugins.forEach(p => {
-    const pageEl = document.createElement('div');
-    pageEl.className = 'page plugin-generated-page';
-    pageEl.id = `page-plugin-${p.name}`;
-    pageEl.innerHTML = buildPluginPage(p);
-    container.appendChild(pageEl);
+    try {
+      const pageEl = document.createElement('div');
+      pageEl.className = 'page plugin-generated-page';
+      pageEl.id = `page-plugin-${p.name}`;
+      pageEl.innerHTML = buildPluginPage(p);
+      container.appendChild(pageEl);
+    } catch (err) {
+      console.error(`[PluginBuildError] Failed to render page for plugin ${p && p.name}:`, err);
+    }
   });
 }
 
