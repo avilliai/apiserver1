@@ -575,6 +575,103 @@ function logsPage(delta) {
   loadAdminLogs(false);
 }
 
+/**
+ * 格式化并美化审计日志的报文（兼容老日志中的 \uXXXX 转义及庞大 base64 图片）
+ */
+function formatLogPayload(raw) {
+  if (!raw) return '[No Payload Body]';
+
+  let text = String(raw);
+
+  // 1. 如果包含庞大 data:image/...;base64,... 做客户端简写与保底优化
+  const dataImgRegex = /data:image\/(?:[a-zA-Z0-9+\-.]+);base64,([A-Za-z0-9+/=]{80,})/gi;
+  text = text.replace(dataImgRegex, (match, b64) => {
+    const kb = Math.round((b64.length * 3 / 4 / 1024) * 10) / 10;
+    return `[图片: base64, 大小约 ${kb}KB]`;
+  });
+
+  // 2. 尝试 JSON 格式化与解析（同时会自动把已转义的 \uXXXX 转成真实字符）
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      const simplifyObj = (o) => {
+        if (!o || typeof o !== 'object') return o;
+        if (Array.isArray(o)) return o.map(simplifyObj);
+        const res = {};
+        for (const [k, v] of Object.entries(o)) {
+          if ((k === 'b64_json' || k === 'image_base64') && typeof v === 'string' && v.length > 80) {
+            const kb = Math.round((v.length * 3 / 4 / 1024) * 10) / 10;
+            res[k] = `[图片 base64 数据已简写, 大小约 ${kb}KB]`;
+          } else if (k === 'data' && typeof v === 'string' && v.length > 80 && (
+            o.type === 'base64' || String(o.media_type || '').includes('image') || String(o.mime_type || '').includes('image')
+          )) {
+            const kb = Math.round((v.length * 3 / 4 / 1024) * 10) / 10;
+            res[k] = `[图片 base64 数据已简写, 大小约 ${kb}KB]`;
+          } else {
+            res[k] = simplifyObj(v);
+          }
+        }
+        return res;
+      };
+      return JSON.stringify(simplifyObj(parsed), null, 2);
+    } catch (e) {
+      // 可能是旧日志被截断导致非合法 JSON，走后续的 Unicode 解码
+    }
+  }
+
+  // 3. 针对非标准/截断文本，使用正则将 \uXXXX 和 emoji 代理对还原为中文字符
+  try {
+    text = text.replace(/\\u([dD][89a-bA-B][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})/g, (m, h, l) => {
+      try {
+        return JSON.parse(`"${m}"`);
+      } catch (_) {
+        return m;
+      }
+    });
+    text = text.replace(/\\u([0-9a-fA-F]{4})/g, (m, hex) => {
+      try {
+        return String.fromCharCode(parseInt(hex, 16));
+      } catch (_) {
+        return m;
+      }
+    });
+  } catch (_) {}
+
+  return text;
+}
+
+function copyLogPayload(elementId) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  const text = el.innerText || el.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      toast('报文内容已复制到剪贴板');
+    }).catch(() => {
+      _fallbackCopyLog(text);
+    });
+  } else {
+    _fallbackCopyLog(text);
+  }
+}
+
+function _fallbackCopyLog(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    toast('报文内容已复制到剪贴板');
+  } catch (e) {
+    toast('复制失败，请手动选中文本复制', 'error');
+  }
+  document.body.removeChild(ta);
+}
+
 function openLogDetail(id) {
   const l = _logsById[id];
   if (!l) return;
@@ -587,6 +684,9 @@ function openLogDetail(id) {
     <span>请求报文审计 // <strong>#${l.id}</strong></span>
     <span style="font-family:var(--font-mono);font-size:12px;color:var(--cyan)">${escHtml(l.plugin)} · ${escHtml(l.endpoint || '')}</span>
   `;
+
+  const reqFormatted = formatLogPayload(l.request_body);
+  const respFormatted = formatLogPayload(l.response_body || '[No Response Body Logged]');
 
   document.getElementById('log-modal-body').innerHTML = `
     <div class="log-detail-grid">
@@ -622,14 +722,20 @@ function openLogDetail(id) {
       </div>
     ` : ''}
 
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary);margin-bottom:4px">请求载荷报文 (REQUEST PAYLOAD)</div>
-      <pre style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);max-height:180px;overflow:auto;margin:0">${escHtml(l.request_body || '[No Payload Body]')}</pre>
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary)">请求载荷报文 (REQUEST PAYLOAD)</div>
+        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:11px" onclick="copyLogPayload('log-req-payload')">复制请求报文</button>
+      </div>
+      <pre id="log-req-payload" style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--text-secondary);max-height:360px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word">${escHtml(reqFormatted)}</pre>
     </div>
 
     <div>
-      <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary);margin-bottom:4px">响应数据摘要 (RESPONSE SUMMARY)</div>
-      <pre style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);max-height:180px;overflow:auto;margin:0">${escHtml(l.response_body || '[No Response Body Logged]')}</pre>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:11px;font-family:var(--font-mono);color:var(--text-tertiary)">响应数据摘要 (RESPONSE SUMMARY)</div>
+        <button class="btn btn-secondary btn-sm" style="padding:2px 8px;font-size:11px" onclick="copyLogPayload('log-resp-payload')">复制响应数据</button>
+      </div>
+      <pre id="log-resp-payload" style="background:var(--bg-canvas);border:1px solid var(--border-dim);border-radius:var(--radius-xs);padding:12px;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--text-secondary);max-height:280px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word">${escHtml(respFormatted)}</pre>
     </div>
   `;
 }

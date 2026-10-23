@@ -1,4 +1,4 @@
-"""
+r"""
 core/access_log.py — 请求审计中间件 + IP 封禁拦截（纯 ASGI 实现）
 
 职责：
@@ -11,12 +11,16 @@ core/access_log.py — 请求审计中间件 + IP 封禁拦截（纯 ASGI 实现
 为什么用纯 ASGI 而非 BaseHTTPMiddleware：能逐块 tee 请求/响应字节流，
 即时转发每个 chunk，从而不破坏 openai_proxy 的 SSE 流式响应。
 
-可读性：body 以原始 UTF-8 文本存储（非 \\uXXXX 转义）；二进制/过大内容做
-占位与截断，避免日志爆量。
+可读性与完整性优化：
+1. 大幅调高缓冲上限（请求体 20MB / 响应体 5MB），长 prompt、多轮对话不再截断。
+2. 智能识别并简写 base64 图片（如 data:image/...;base64,... 及 JSON 中的 base64 数据），
+   既防止图片撑爆数据库，又 100% 完整保留文本提示词。
+3. 规范化 Unicode 编码：将 \uXXXX 转义序列还原为真实中文，并做美化缩进排版。
 """
 import hashlib
 import json
 import logging
+import re
 import time
 
 from sqlalchemy import select
@@ -26,8 +30,10 @@ from core.auth_utils import decode_token
 
 logger = logging.getLogger(__name__)
 
-# ── 配置 ──────────────────────────────────────────────────────────────────
-MAX_BODY = 16 * 1024  # 请求/响应体各自最多截留 16KB
+# ── 缓冲配置 ──────────────────────────────────────────────────────────────
+MAX_REQ_BODY = 20 * 1024 * 1024   # 请求体最多截留 20MB（足以容纳带图长请求并做解析简写）
+MAX_RESP_BODY = 5 * 1024 * 1024   # 响应体最多截留 5MB
+MAX_STORE_TEXT = 1024 * 1024      # 清洗后存入 DB 的单条文本上限 1MB（日常绝不截断）
 
 # 不记录这些前缀的请求：管理面板自身 / 认证(含密码) / 静态资源 / 文档。
 # 其余即为真正的"网关 API 调用"（openai 代理 /v1/* 与插件 /api/v1/<plugin>/*）。
@@ -121,7 +127,7 @@ def remove_banned_ip(ip: str) -> None:
     _banned_ips.discard(ip)
 
 
-# ── 工具 ──────────────────────────────────────────────────────────────────
+# ── 报文处理与清洗工具 ────────────────────────────────────────────────────────
 def _header_get(headers, name: bytes):
     for k, v in headers:
         if k == name:
@@ -133,7 +139,7 @@ def _header_get(headers, name: bytes):
 
 
 def get_client_ip(headers, scope) -> str:
-    """优先取代理头里的真实客户端 IP，回退到直连地址。"""
+    """优先取反向代理注入的真实客户端 IP，垫底用直连地址。"""
     xff = _header_get(headers, b"x-forwarded-for")
     if xff:
         return xff.split(",")[0].strip()
@@ -144,23 +150,104 @@ def get_client_ip(headers, scope) -> str:
     return client[0] if client else "unknown"
 
 
+_DATA_IMAGE_RE = re.compile(
+    r'data:image(?:/|\\/)([a-zA-Z0-9\+\-\.]+);base64,([A-Za-z0-9+/=]{80,})',
+    re.IGNORECASE
+)
+_UNICODE_ESCAPE_RE = re.compile(r'\\u([0-9a-fA-F]{4})')
+_SURROGATE_PAIR_RE = re.compile(r'\\u[dD][89a-bA-B][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}')
+
+
+def _simplify_data_urls(text: str) -> str:
+    r"""将 data:image/...;base64,... 替换为简写标记。"""
+    def _repl(m):
+        fmt = m.group(1)
+        b64_len = len(m.group(2))
+        approx_kb = round(b64_len * 3 / 4 / 1024, 1)
+        return f"[图片: image/{fmt}, 大小约 {approx_kb}KB]"
+    return _DATA_IMAGE_RE.sub(_repl, text)
+
+
+def _unescape_unicode(text: str) -> str:
+    r"""将 \uXXXX 以及 emoji 代理对转义还原为真实中文字符与表情。"""
+    try:
+        def _surr_repl(m):
+            try:
+                return json.loads('"' + m.group(0) + '"')
+            except Exception:
+                return m.group(0)
+        text = _SURROGATE_PAIR_RE.sub(_surr_repl, text)
+        def _single_repl(m):
+            try:
+                return json.loads('"' + m.group(0) + '"')
+            except Exception:
+                return chr(int(m.group(1), 16))
+        return _UNICODE_ESCAPE_RE.sub(_single_repl, text)
+    except Exception:
+        return text
+
+
+def _simplify_json_images(obj):
+    r"""递归清洗 JSON 结构中的长 base64 图片数据（支持 OpenAI / Gemini / Claude / DALL-E / SD 等）。"""
+    if isinstance(obj, dict):
+        new_obj = {}
+        for k, v in obj.items():
+            if k in ("b64_json", "image_base64") and isinstance(v, str) and len(v) > 80:
+                approx_kb = round(len(v) * 3 / 4 / 1024, 1)
+                new_obj[k] = f"[图片 base64 数据已简写, 大小约 {approx_kb}KB]"
+            elif k == "data" and isinstance(v, str) and len(v) > 80 and (
+                obj.get("type") == "base64"
+                or "image" in str(obj.get("media_type", "")).lower()
+                or "image" in str(obj.get("mime_type", "")).lower()
+            ):
+                approx_kb = round(len(v) * 3 / 4 / 1024, 1)
+                new_obj[k] = f"[图片 base64 数据已简写, 大小约 {approx_kb}KB]"
+            elif isinstance(v, str) and ("data:image/" in v or "data:image\/" in v):
+                new_obj[k] = _simplify_data_urls(v)
+            else:
+                new_obj[k] = _simplify_json_images(v)
+        return new_obj
+    elif isinstance(obj, list):
+        return [_simplify_json_images(item) for item in obj]
+    elif isinstance(obj, str):
+        if "data:image/" in obj or "data:image\/" in obj:
+            return _simplify_data_urls(obj)
+        return obj
+    return obj
+    return obj
+
+
 def _decode_body(raw: bytes, content_type: str, truncated: bool) -> str:
     if not raw:
         return ""
     if _is_binary_ct(content_type):
         return f"[binary {content_type or 'unknown'} ~{len(raw)}+ bytes]"
+
     text = raw.decode("utf-8", errors="replace")
-    # 规范化 JSON：把客户端用 ensure_ascii=True 序列化产生的 \uXXXX 转义还原为
-    # 可读中文，既便于阅读也便于关键字检索。非 JSON / 截断的 body 原样保留。
-    if not truncated:
-        stripped = text.lstrip()
-        if stripped[:1] in ("{", "["):
-            try:
-                text = json.dumps(json.loads(text), ensure_ascii=False)
-            except Exception:
-                pass
+
+    # 规范化与清洗
+    stripped = text.lstrip()
+    is_json = False
+    if stripped.startswith("{") or stripped.startswith("["):
+        try:
+            parsed = json.loads(text)
+            cleaned = _simplify_json_images(parsed)
+            # ensure_ascii=False 确保 Unicode 字符转为可读中文，indent=2 美化排版
+            text = json.dumps(cleaned, ensure_ascii=False, indent=2)
+            is_json = True
+        except Exception:
+            is_json = False
+
+    if not is_json:
+        # 非合规 JSON 或未完整解析：做文本级简写与 Unicode 转义还原
+        text = _simplify_data_urls(text)
+        text = _unescape_unicode(text)
+
     if truncated:
-        text += "\n...[truncated]"
+        text += "\n...[上游传输超出缓冲上限截断]"
+    elif len(text) > MAX_STORE_TEXT:
+        text = text[:MAX_STORE_TEXT] + f"\n...[日志文本超出 {round(MAX_STORE_TEXT/1024/1024, 1)}MB 已截断]"
+
     return text
 
 
@@ -233,15 +320,15 @@ class AccessLogMiddleware:
         started = time.time()
         req_ct = _header_get(headers, b"content-type") or ""
 
-        # ── tee 请求体（上限 MAX_BODY）──
+        # ── tee 请求体（上限 MAX_REQ_BODY）──
         req_chunks, req_state = [], {"size": 0, "truncated": False}
 
         async def receive_wrapper():
             message = await receive()
             if message["type"] == "http.request":
                 body = message.get("body", b"")
-                if body and req_state["size"] < MAX_BODY:
-                    take = body[: MAX_BODY - req_state["size"]]
+                if body and req_state["size"] < MAX_REQ_BODY:
+                    take = body[: MAX_REQ_BODY - req_state["size"]]
                     req_chunks.append(take)
                     req_state["size"] += len(take)
                     if len(take) < len(body):
@@ -250,7 +337,7 @@ class AccessLogMiddleware:
                     req_state["truncated"] = True
             return message
 
-        # ── tee 响应体（每块即时转发，保留流式；上限 MAX_BODY）──
+        # ── tee 响应体（每块即时转发，保留流式；上限 MAX_RESP_BODY）──
         resp_chunks = []
         resp_state = {"size": 0, "truncated": False, "status": 0, "ct": ""}
 
@@ -260,8 +347,8 @@ class AccessLogMiddleware:
                 resp_state["ct"] = _header_get(message.get("headers", []), b"content-type") or ""
             elif message["type"] == "http.response.body":
                 body = message.get("body", b"")
-                if body and resp_state["size"] < MAX_BODY:
-                    take = body[: MAX_BODY - resp_state["size"]]
+                if body and resp_state["size"] < MAX_RESP_BODY:
+                    take = body[: MAX_RESP_BODY - resp_state["size"]]
                     resp_chunks.append(take)
                     resp_state["size"] += len(take)
                     if len(take) < len(body):
